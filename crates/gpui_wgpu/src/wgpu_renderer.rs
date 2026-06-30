@@ -1305,6 +1305,10 @@ impl WgpuRenderer {
                             // Not implemented for Linux/wgpu
                             true
                         }
+                        // Lux fork (additive): zero-copy external-texture
+                        // compositing. No-op stub here; the real wgpu sample
+                        // pipeline is implemented in Task 0.4.
+                        PrimitiveBatch::ExternalTextures(_range) => true,
                     };
                     if !ok {
                         overflow = true;

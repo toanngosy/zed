@@ -7,9 +7,9 @@ use cocoa::{
     quartzcore::AutoresizingMask,
 };
 use gpui::{
-    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, MonochromeSprite, PaintSurface,
-    Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, Shadow, Size,
-    Surface, Underline, point, size,
+    AtlasTextureId, Background, Bounds, ContentMask, DevicePixels, MonochromeSprite,
+    PaintExternalTexture, PaintSurface, Path, Point, PolychromeSprite, PrimitiveBatch, Quad,
+    ScaledPixels, Scene, Shadow, Size, Surface, Underline, point, size,
 };
 #[cfg(any(test, feature = "test-support"))]
 use image::RgbaImage;
@@ -125,6 +125,8 @@ pub(crate) struct MetalRenderer {
     monochrome_sprites_pipeline_state: metal::RenderPipelineState,
     polychrome_sprites_pipeline_state: metal::RenderPipelineState,
     surfaces_pipeline_state: metal::RenderPipelineState,
+    // Lux fork (additive): zero-copy external-texture (chart-engine) compositing.
+    external_textures_pipeline_state: metal::RenderPipelineState,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
@@ -322,6 +324,17 @@ impl MetalRenderer {
             "surface_fragment",
             MTLPixelFormat::BGRA8Unorm,
         );
+        // Lux fork (additive): reuse the surface vertex shader (bounds +
+        // content-mask + full-texture UV) with a single-texture RGBA/BGRA
+        // fragment shader — no YUV, no atlas.
+        let external_textures_pipeline_state = build_pipeline_state(
+            &device,
+            &library,
+            "external_textures",
+            "surface_vertex",
+            "external_texture_fragment",
+            MTLPixelFormat::BGRA8Unorm,
+        );
 
         let command_queue = device.new_command_queue();
         let sprite_atlas = Arc::new(MetalAtlas::new(device.clone(), is_apple_gpu));
@@ -344,6 +357,7 @@ impl MetalRenderer {
             monochrome_sprites_pipeline_state,
             polychrome_sprites_pipeline_state,
             surfaces_pipeline_state,
+            external_textures_pipeline_state,
             unit_vertices,
             instance_buffer_pool,
             sprite_atlas,
@@ -923,6 +937,13 @@ impl MetalRenderer {
                     ),
                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(
                     &scene.surfaces[range],
+                    instance_buffer,
+                    &mut instance_offset,
+                    viewport_size,
+                    command_encoder,
+                ),
+                PrimitiveBatch::ExternalTextures(range) => self.draw_external_textures(
+                    &scene.external_textures[range],
                     instance_buffer,
                     &mut instance_offset,
                     viewport_size,
@@ -1564,6 +1585,85 @@ impl MetalRenderer {
             *instance_offset = next_offset;
         }
         true
+    }
+
+    /// Lux fork (additive): composite externally-owned RGBA/BGRA textures
+    /// (e.g. embedded chart-engine frames) zero-copy. Mirrors [`Self::draw_surfaces`]
+    /// but binds a single texture sampled directly — no YUV planes, no atlas
+    /// upload, no readback.
+    fn draw_external_textures(
+        &mut self,
+        textures: &[PaintExternalTexture],
+        instance_buffer: &mut InstanceBuffer,
+        instance_offset: &mut usize,
+        viewport_size: Size<DevicePixels>,
+        command_encoder: &metal::RenderCommandEncoderRef,
+    ) -> bool {
+        if textures.is_empty() {
+            return true;
+        }
+        command_encoder.set_render_pipeline_state(&self.external_textures_pipeline_state);
+        command_encoder.set_vertex_buffer(
+            SurfaceInputIndex::Vertices as u64,
+            Some(&self.unit_vertices),
+            0,
+        );
+        command_encoder.set_vertex_bytes(
+            SurfaceInputIndex::ViewportSize as u64,
+            mem::size_of_val(&viewport_size) as u64,
+            &viewport_size as *const Size<DevicePixels> as *const _,
+        );
+
+        for external in textures {
+            let texture_size = size(
+                DevicePixels(external.texture.width() as i32),
+                DevicePixels(external.texture.height() as i32),
+            );
+
+            align_offset(instance_offset);
+            let next_offset = *instance_offset + mem::size_of::<SurfaceBounds>();
+            if next_offset > instance_buffer.size {
+                return false;
+            }
+
+            command_encoder.set_vertex_buffer(
+                SurfaceInputIndex::Surfaces as u64,
+                Some(&instance_buffer.metal_buffer),
+                *instance_offset as u64,
+            );
+            command_encoder.set_vertex_bytes(
+                SurfaceInputIndex::TextureSize as u64,
+                mem::size_of_val(&texture_size) as u64,
+                &texture_size as *const Size<DevicePixels> as *const _,
+            );
+            command_encoder
+                .set_fragment_texture(SurfaceInputIndex::YTexture as u64, Some(&external.texture));
+
+            unsafe {
+                let buffer_contents = (instance_buffer.metal_buffer.contents() as *mut u8)
+                    .add(*instance_offset) as *mut SurfaceBounds;
+                ptr::write(
+                    buffer_contents,
+                    SurfaceBounds {
+                        bounds: external.bounds,
+                        content_mask: external.content_mask,
+                    },
+                );
+            }
+
+            command_encoder.draw_primitives(metal::MTLPrimitiveType::Triangle, 0, 6);
+            *instance_offset = next_offset;
+        }
+        true
+    }
+
+    /// Lux fork (additive): the renderer's Metal device, exposed so an embedded
+    /// engine (chart-engine via wgpu-hal) can build its wgpu device on the SAME
+    /// `MTLDevice` (Q2 shared-device path) and hand back textures GPUI samples
+    /// directly. Returns a retained handle; safe to clone.
+    #[allow(dead_code)]
+    pub(crate) fn metal_device(&self) -> metal::Device {
+        self.device.clone()
     }
 }
 

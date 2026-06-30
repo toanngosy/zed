@@ -338,6 +338,9 @@ impl DirectXRenderer {
                     self.draw_polychrome_sprites(texture_id, range.start, range.len())
                 }
                 PrimitiveBatch::Surfaces(range) => self.draw_surfaces(&scene.surfaces[range]),
+                // Lux fork (additive): zero-copy external-texture compositing
+                // is not implemented for the DirectX backend; no-op stub.
+                PrimitiveBatch::ExternalTextures(_range) => Ok(()),
             }
             .context(format!(
                 "scene too large:\

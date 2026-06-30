@@ -4111,6 +4111,33 @@ impl Window {
         });
     }
 
+    /// Lux fork (additive): paint an externally-owned GPU texture into the
+    /// scene at the current z-index — the zero-copy embed seam for a
+    /// continuously-redrawing chart-engine frame.
+    ///
+    /// The `texture` must outlive the frame; the caller (e.g. a `ChartPanel`)
+    /// keeps its render target alive and hands the same texture each frame.
+    /// Unlike [`Self::paint_image`], nothing is uploaded or atlased — GPUI
+    /// samples the texture directly during its existing compositing pass.
+    ///
+    /// This method should only be called as part of the paint phase of element
+    /// drawing.
+    #[cfg(target_os = "macos")]
+    pub fn paint_external_texture(&mut self, bounds: Bounds<Pixels>, texture: metal::Texture) {
+        use crate::PaintExternalTexture;
+
+        self.invalidator.debug_assert_paint();
+
+        let bounds = self.snap_bounds(bounds);
+        let content_mask = self.snapped_content_mask();
+        self.next_frame.scene.insert_primitive(PaintExternalTexture {
+            order: 0,
+            bounds,
+            content_mask,
+            texture,
+        });
+    }
+
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {

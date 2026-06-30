@@ -899,6 +899,18 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
   return ycbcrToRGBTransform * ycbcr;
 }
 
+// Lux fork (additive): sample a single externally-owned RGBA/BGRA texture
+// (e.g. an embedded chart-engine frame) directly. Reuses `surface_vertex`
+// and the `SurfaceInputIndex_YTexture` binding; no YUV conversion. A
+// BGRA8Unorm texture is presented to the shader in logical RGBA order, so the
+// sampled value is returned as-is.
+fragment float4 external_texture_fragment(SurfaceFragmentInput input [[stage_in]],
+                                          texture2d<float> external_texture
+                                          [[texture(SurfaceInputIndex_YTexture)]]) {
+  constexpr sampler texture_sampler(mag_filter::linear, min_filter::linear);
+  return external_texture.sample(texture_sampler, input.texture_position);
+}
+
 float4 hsla_to_rgba(Hsla hsla) {
   float h = hsla.h * 6.0; // Now, it's an angle but scaled in [0, 6) range
   float s = hsla.s;

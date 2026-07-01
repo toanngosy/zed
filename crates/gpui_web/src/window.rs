@@ -690,6 +690,15 @@ impl PlatformWindow for WebWindow {
         self.inner.state.borrow().renderer.sprite_atlas().clone()
     }
 
+    // Lux fork (additive): expose the shared wgpu device/queue/adapter so an
+    // embedded engine (chart-engine) can render on GPUI's device (zero-copy).
+    #[cfg(not(target_os = "macos"))]
+    fn shared_wgpu(
+        &self,
+    ) -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>, wgpu::Adapter)> {
+        Some(self.inner.state.borrow().renderer.shared_gpu())
+    }
+
     fn is_subpixel_rendering_supported(&self) -> bool {
         self.inner
             .state

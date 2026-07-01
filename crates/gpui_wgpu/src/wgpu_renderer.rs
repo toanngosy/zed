@@ -1,9 +1,9 @@
 use crate::{CompositorGpuHint, WgpuAtlas, WgpuContext};
 use bytemuck::{Pod, Zeroable};
 use gpui::{
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, MonochromeSprite, Path, Point,
-    PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene, Shadow, Size, SubpixelSprite,
-    Underline, get_gamma_correction_ratios,
+    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, MonochromeSprite,
+    PaintExternalTexture, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene,
+    Shadow, Size, SubpixelSprite, Underline, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -92,6 +92,8 @@ struct WgpuPipelines {
     poly_sprites: wgpu::RenderPipeline,
     #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
+    // Lux fork (additive): zero-copy external-texture (chart-engine) compositing.
+    external_textures: wgpu::RenderPipeline,
 }
 
 struct WgpuBindGroupLayouts {
@@ -108,6 +110,9 @@ pub type GpuContext = Rc<RefCell<Option<WgpuContext>>>;
 struct WgpuResources {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
+    // Lux fork (additive): retained so an embedded engine can build its
+    // GpuContext on this exact adapter+device (shared-device zero-copy).
+    adapter: wgpu::Adapter,
     surface: wgpu::Surface<'static>,
     pipelines: WgpuPipelines,
     bind_group_layouts: WgpuBindGroupLayouts,
@@ -449,6 +454,7 @@ impl WgpuRenderer {
         let resources = WgpuResources {
             device,
             queue,
+            adapter: context.adapter.clone(),
             surface,
             pipelines,
             bind_group_layouts,
@@ -872,6 +878,21 @@ impl WgpuRenderer {
             &layouts.globals,
             &layouts.surfaces,
             wgpu::PrimitiveTopology::TriangleStrip,
+            &[Some(color_target.clone())],
+            1,
+            &shader_module,
+        );
+
+        // Lux fork (additive): reuse vs_surface + the surfaces bind-group layout
+        // with a single-texture (non-YUV) fragment for zero-copy external
+        // textures (embedded chart-engine frames).
+        let external_textures = create_pipeline(
+            "external_textures",
+            "vs_surface",
+            "fs_external_texture",
+            &layouts.globals,
+            &layouts.surfaces,
+            wgpu::PrimitiveTopology::TriangleStrip,
             &[Some(color_target)],
             1,
             &shader_module,
@@ -887,6 +908,7 @@ impl WgpuRenderer {
             subpixel_sprites,
             poly_sprites,
             surfaces,
+            external_textures,
         }
     }
 
@@ -1306,9 +1328,18 @@ impl WgpuRenderer {
                             true
                         }
                         // Lux fork (additive): zero-copy external-texture
-                        // compositing. No-op stub here; the real wgpu sample
-                        // pipeline is implemented in Task 0.4.
-                        PrimitiveBatch::ExternalTextures(_range) => true,
+                        // compositing (embedded chart-engine frame).
+                        PrimitiveBatch::ExternalTextures(range) => {
+                            #[cfg(not(target_os = "macos"))]
+                            {
+                                self.draw_external_textures(&scene.external_textures[range], &mut pass)
+                            }
+                            #[cfg(target_os = "macos")]
+                            {
+                                let _ = range;
+                                true
+                            }
+                        }
                     };
                     if !ok {
                         overflow = true;
@@ -1429,6 +1460,84 @@ impl WgpuRenderer {
             instance_offset,
             pass,
         )
+    }
+
+    /// Lux fork (additive): the shared wgpu device + queue, so an embedded
+    /// engine (chart-engine) can build its `GpuContext` on the SAME device
+    /// GPUI renders with — the WebGPU shared-device zero-copy path (WebGPU
+    /// forbids cross-`GPUDevice` texture use, so the device must be shared).
+    #[cfg(not(target_os = "macos"))]
+    pub fn shared_gpu(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, wgpu::Adapter) {
+        let r = self.resources();
+        (Arc::clone(&r.device), Arc::clone(&r.queue), r.adapter.clone())
+    }
+
+    /// Lux fork (additive): composite externally-owned RGBA `wgpu::Texture`s
+    /// (embedded chart-engine frames) zero-copy. Reuses `vs_surface` + the
+    /// surfaces bind-group layout with the non-YUV `fs_external_texture`.
+    #[cfg(not(target_os = "macos"))]
+    fn draw_external_textures(
+        &self,
+        textures: &[PaintExternalTexture],
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        if textures.is_empty() {
+            return true;
+        }
+        let resources = self.resources();
+        let device = &resources.device;
+        for external in textures {
+            let params = SurfaceParams {
+                bounds: external.bounds.into(),
+                content_mask: external.content_mask.bounds.into(),
+            };
+            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("external_texture_params"),
+                size: std::mem::size_of::<SurfaceParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM,
+                mapped_at_creation: true,
+            });
+            uniform
+                .slice(..)
+                .get_mapped_range_mut()
+                .copy_from_slice(bytemuck::bytes_of(&params));
+            uniform.unmap();
+
+            let view = external
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("external_texture_bind_group"),
+                layout: &resources.bind_group_layouts.surfaces,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform.as_entire_binding(),
+                    },
+                    // b1 (t_y) is the sampled texture; b2 (t_cb_cr) is bound to
+                    // the same view to satisfy the reused surfaces layout but is
+                    // ignored by fs_external_texture.
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&resources.atlas_sampler),
+                    },
+                ],
+            });
+
+            pass.set_pipeline(&resources.pipelines.external_textures);
+            pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+            pass.set_bind_group(1, &bind_group, &[]);
+            pass.draw(0..4, 0..1);
+        }
+        true
     }
 
     fn draw_polychrome_sprites(

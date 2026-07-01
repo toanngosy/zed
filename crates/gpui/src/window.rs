@@ -4138,6 +4138,40 @@ impl Window {
         });
     }
 
+    /// Lux fork (additive): the shared wgpu device/queue/adapter GPUI renders
+    /// with, so an embedded engine (chart-engine) can build its `GpuContext` on
+    /// the SAME device — the WebGPU shared-device zero-copy path. `None` if the
+    /// platform window has no wgpu renderer.
+    #[cfg(not(target_os = "macos"))]
+    pub fn shared_wgpu(
+        &self,
+    ) -> Option<(
+        std::sync::Arc<wgpu::Device>,
+        std::sync::Arc<wgpu::Queue>,
+        wgpu::Adapter,
+    )> {
+        self.platform_window.shared_wgpu()
+    }
+
+    /// Lux fork (additive): web/Linux (wgpu) variant of
+    /// [`Self::paint_external_texture`] — samples a `wgpu::Texture` built on the
+    /// shared GPUI device (see [`Self::shared_wgpu`]).
+    #[cfg(not(target_os = "macos"))]
+    pub fn paint_external_texture(&mut self, bounds: Bounds<Pixels>, texture: wgpu::Texture) {
+        use crate::PaintExternalTexture;
+
+        self.invalidator.debug_assert_paint();
+
+        let bounds = self.snap_bounds(bounds);
+        let content_mask = self.snapped_content_mask();
+        self.next_frame.scene.insert_primitive(PaintExternalTexture {
+            order: 0,
+            bounds,
+            content_mask,
+            texture,
+        });
+    }
+
     /// Removes an image from the sprite atlas.
     pub fn drop_image(&mut self, data: Arc<RenderImage>) -> Result<()> {
         for frame_index in 0..data.frame_count() {

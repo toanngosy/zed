@@ -20,6 +20,9 @@ path = "src/gpui_web.rs"
 gpui.workspace = true
 parking_lot = { workspace = true, features = ["nightly"] }
 gpui_wgpu.workspace = true
+# Lux fork (additive): name `wgpu::Device`/`Queue`/`Adapter` in the shared_wgpu
+# accessor exposed for embedding chart-engine on GPUI's device.
+wgpu.workspace = true
 http_client.workspace = true
 anyhow.workspace = true
 futures.workspace = true

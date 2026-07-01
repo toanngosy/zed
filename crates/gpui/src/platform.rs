@@ -662,6 +662,19 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn draw(&self, scene: &Scene);
     fn completed_frame(&self) {}
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;
+    /// Lux fork (additive): the shared wgpu device/queue/adapter for embedding
+    /// an external wgpu renderer (chart-engine) on the same device. Default
+    /// `None`; overridden by the wgpu-backed (web/Linux) platform windows.
+    #[cfg(not(target_os = "macos"))]
+    fn shared_wgpu(
+        &self,
+    ) -> Option<(
+        Arc<wgpu::Device>,
+        Arc<wgpu::Queue>,
+        wgpu::Adapter,
+    )> {
+        None
+    }
     fn is_subpixel_rendering_supported(&self) -> bool;
 
     // macOS specific methods

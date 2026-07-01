@@ -138,6 +138,12 @@ mach2.workspace = true
 #TODO: replace with "objc2"
 metal.workspace = true
 
+# Lux fork (additive): the web/Linux `PaintExternalTexture` primitive carries a
+# `wgpu::Texture` handle (sampled by the `gpui_wgpu` renderer). macOS uses metal
+# directly, so wgpu is only needed off-macOS.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+wgpu.workspace = true
+
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos"))'.dependencies]
 pathfinder_geometry = "0.5"
 

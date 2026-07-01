@@ -782,8 +782,12 @@ pub struct PaintExternalTexture {
     pub order: DrawOrder,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
+    /// macOS (Metal) texture handle sampled directly by the Metal renderer.
     #[cfg(target_os = "macos")]
     pub texture: metal::Texture,
+    /// web/Linux (wgpu) texture handle sampled by the `gpui_wgpu` renderer.
+    #[cfg(not(target_os = "macos"))]
+    pub texture: wgpu::Texture,
 }
 
 impl From<PaintExternalTexture> for Primitive {

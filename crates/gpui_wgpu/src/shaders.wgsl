@@ -1362,3 +1362,15 @@ fn fs_surface(input: SurfaceVarying) -> @location(0) vec4<f32> {
 
     return ycbcr_to_RGB * y_cb_cr;
 }
+
+// --- external textures (Lux fork, additive) --- //
+// Reuses vs_surface + the surfaces group(1) bindings (surface_locals, t_y,
+// s_surface). Samples a single RGBA texture directly — no YUV. Used to
+// composite an embedded chart-engine frame zero-copy via paint_external_texture.
+@fragment
+fn fs_external_texture(input: SurfaceVarying) -> @location(0) vec4<f32> {
+    if (any(input.clip_distances < vec4<f32>(0.0))) {
+        return vec4<f32>(0.0);
+    }
+    return textureSampleLevel(t_y, s_surface, input.texture_position, 0.0);
+}

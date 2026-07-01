@@ -5,6 +5,10 @@ use collections::FxHashMap;
 use gpui::{
     AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
     ScaledPixels, Scene, Size, get_gamma_correction_ratios,
+
+    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, MonochromeSprite,
+    PaintExternalTexture, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene,
+    Shadow, Size, SubpixelSprite, Underline, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -134,6 +138,8 @@ struct WgpuPipelines {
     poly_sprites: wgpu::RenderPipeline,
     #[allow(dead_code)]
     surfaces: wgpu::RenderPipeline,
+    // Lux fork (additive): zero-copy external-texture (chart-engine) compositing.
+    external_textures: wgpu::RenderPipeline,
 }
 
 /// One frame allocation of instance data, ready to bind.
@@ -182,6 +188,11 @@ enum InstanceData {
 struct WgpuResources {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
+
+    // Lux fork (additive): retained so an embedded engine can build its
+    // GpuContext on this exact adapter+device (shared-device zero-copy).
+    adapter: wgpu::Adapter,
+    surface: wgpu::Surface<'static>,
     pipelines: WgpuPipelines,
     bind_group_layouts: WgpuBindGroupLayouts,
     atlas_sampler: wgpu::Sampler,
@@ -462,6 +473,125 @@ impl WgpuRenderer {
         surface.configure(&context.device, &surface_config);
 
         let core = WgpuRendererCore::new(context, atlas.clone(), surface_format, alpha_mode);
+
+        let queue = Arc::clone(&context.queue);
+        let dual_source_blending = context.supports_dual_source_blending();
+
+        let rendering_params = RenderingParameters::new(&context.adapter, surface_format);
+        let bind_group_layouts = Self::create_bind_group_layouts(&device);
+        let pipelines = Self::create_pipelines(
+            &device,
+            &bind_group_layouts,
+            surface_format,
+            alpha_mode,
+            rendering_params.path_sample_count,
+            dual_source_blending,
+        );
+
+        let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("atlas_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as u64;
+        let globals_size = std::mem::size_of::<GlobalParams>() as u64;
+        let gamma_size = std::mem::size_of::<GammaParams>() as u64;
+        let path_globals_offset = globals_size.next_multiple_of(uniform_alignment);
+        let gamma_offset = (path_globals_offset + globals_size).next_multiple_of(uniform_alignment);
+
+        let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("globals_buffer"),
+            size: gamma_offset + gamma_size,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let max_buffer_size = device.limits().max_buffer_size;
+        let storage_buffer_alignment = device.limits().min_storage_buffer_offset_alignment as u64;
+        let initial_instance_buffer_capacity = 2 * 1024 * 1024;
+        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("instance_buffer"),
+            size: initial_instance_buffer_capacity,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("globals_bind_group"),
+            layout: &bind_group_layouts.globals,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &globals_buffer,
+                        offset: 0,
+                        size: Some(NonZeroU64::new(globals_size).unwrap()),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &globals_buffer,
+                        offset: gamma_offset,
+                        size: Some(NonZeroU64::new(gamma_size).unwrap()),
+                    }),
+                },
+            ],
+        });
+
+        let path_globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("path_globals_bind_group"),
+            layout: &bind_group_layouts.globals,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &globals_buffer,
+                        offset: path_globals_offset,
+                        size: Some(NonZeroU64::new(globals_size).unwrap()),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &globals_buffer,
+                        offset: gamma_offset,
+                        size: Some(NonZeroU64::new(gamma_size).unwrap()),
+                    }),
+                },
+            ],
+        });
+
+        let adapter_info = context.adapter.get_info();
+
+        let last_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let last_error_clone = Arc::clone(&last_error);
+        device.on_uncaptured_error(Arc::new(move |error| {
+            let mut guard = last_error_clone.lock().unwrap();
+            *guard = Some(error.to_string());
+        }));
+
+        let resources = WgpuResources {
+            device,
+            queue,
+            adapter: context.adapter.clone(),
+            surface,
+            pipelines,
+            bind_group_layouts,
+            atlas_sampler,
+            globals_buffer,
+            globals_bind_group,
+            path_globals_bind_group,
+            instance_buffer,
+            // Defer intermediate texture creation to first draw call via ensure_intermediate_textures().
+            // This avoids panics when the device/surface is in an invalid state during initialization.
+            path_intermediate_texture: None,
+            path_intermediate_view: None,
+            path_msaa_texture: None,
+            path_msaa_view: None,
+        };
 
         Ok(Self {
             context: gpu_context,
@@ -925,6 +1055,21 @@ impl WgpuRendererCore {
             &layouts.surfaces,
             None,
             wgpu::PrimitiveTopology::TriangleStrip,
+            &[Some(color_target.clone())],
+            1,
+            &shader_module,
+        );
+
+        // Lux fork (additive): reuse vs_surface + the surfaces bind-group layout
+        // with a single-texture (non-YUV) fragment for zero-copy external
+        // textures (embedded chart-engine frames).
+        let external_textures = create_pipeline(
+            "external_textures",
+            "vs_surface",
+            "fs_external_texture",
+            &layouts.globals,
+            &layouts.surfaces,
+            wgpu::PrimitiveTopology::TriangleStrip,
             &[Some(color_target)],
             1,
             &shader_module,
@@ -940,6 +1085,7 @@ impl WgpuRendererCore {
             subpixel_sprites,
             poly_sprites,
             surfaces,
+            external_textures,
         }
     }
 
@@ -1570,6 +1716,55 @@ impl WgpuRendererCore {
                                 &mut pass,
                             )?;
                         }
+
+                        PrimitiveBatch::Underlines(range) => self.draw_underlines(
+                            &scene.underlines[range],
+                            &mut instance_offset,
+                            &mut pass,
+                        ),
+                        PrimitiveBatch::MonochromeSprites { texture_id, range } => self
+                            .draw_monochrome_sprites(
+                                &scene.monochrome_sprites[range],
+                                texture_id,
+                                &mut instance_offset,
+                                &mut pass,
+                            ),
+                        PrimitiveBatch::SubpixelSprites { texture_id, range } => self
+                            .draw_subpixel_sprites(
+                                &scene.subpixel_sprites[range],
+                                texture_id,
+                                &mut instance_offset,
+                                &mut pass,
+                            ),
+                        PrimitiveBatch::PolychromeSprites { texture_id, range } => self
+                            .draw_polychrome_sprites(
+                                &scene.polychrome_sprites[range],
+                                texture_id,
+                                &mut instance_offset,
+                                &mut pass,
+                            ),
+                        PrimitiveBatch::Surfaces(_surfaces) => {
+                            // Surfaces are macOS-only for video playback
+                            // Not implemented for Linux/wgpu
+                            true
+                        }
+                        // Lux fork (additive): zero-copy external-texture
+                        // compositing (embedded chart-engine frame).
+                        PrimitiveBatch::ExternalTextures(range) => {
+                            #[cfg(not(target_os = "macos"))]
+                            {
+                                self.draw_external_textures(&scene.external_textures[range], &mut pass)
+                            }
+                            #[cfg(target_os = "macos")]
+                            {
+                                let _ = range;
+                                true
+                            }
+                        }
+                    };
+                    if !ok {
+                        overflow = true;
+                        break;
                     }
                     PrimitiveBatch::Underlines(range) => self.draw_instances(
                         &instance_bindings.underlines,
@@ -1730,6 +1925,196 @@ impl WgpuRendererCore {
                 },
             );
         }
+    }
+
+
+    fn draw_quads(
+        &self,
+        quads: &[Quad],
+        instance_offset: &mut u64,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        let data = unsafe { Self::instance_bytes(quads) };
+        self.draw_instances(
+            data,
+            quads.len() as u32,
+            &self.resources().pipelines.quads,
+            instance_offset,
+            pass,
+        )
+    }
+
+    fn draw_shadows(
+        &self,
+        shadows: &[Shadow],
+        instance_offset: &mut u64,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        let data = unsafe { Self::instance_bytes(shadows) };
+        self.draw_instances(
+            data,
+            shadows.len() as u32,
+            &self.resources().pipelines.shadows,
+            instance_offset,
+            pass,
+        )
+    }
+
+    fn draw_underlines(
+        &self,
+        underlines: &[Underline],
+        instance_offset: &mut u64,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        let data = unsafe { Self::instance_bytes(underlines) };
+        self.draw_instances(
+            data,
+            underlines.len() as u32,
+            &self.resources().pipelines.underlines,
+            instance_offset,
+            pass,
+        )
+    }
+
+    fn draw_monochrome_sprites(
+        &self,
+        sprites: &[MonochromeSprite],
+        texture_id: AtlasTextureId,
+        instance_offset: &mut u64,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        let tex_info = self.atlas.get_texture_info(texture_id);
+        let data = unsafe { Self::instance_bytes(sprites) };
+        self.draw_instances_with_texture(
+            data,
+            sprites.len() as u32,
+            &tex_info.view,
+            &self.resources().pipelines.mono_sprites,
+            instance_offset,
+            pass,
+        )
+    }
+
+    fn draw_subpixel_sprites(
+        &self,
+        sprites: &[SubpixelSprite],
+        texture_id: AtlasTextureId,
+        instance_offset: &mut u64,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        let tex_info = self.atlas.get_texture_info(texture_id);
+        let data = unsafe { Self::instance_bytes(sprites) };
+        let resources = self.resources();
+        let pipeline = resources
+            .pipelines
+            .subpixel_sprites
+            .as_ref()
+            .unwrap_or(&resources.pipelines.mono_sprites);
+        self.draw_instances_with_texture(
+            data,
+            sprites.len() as u32,
+            &tex_info.view,
+            pipeline,
+            instance_offset,
+            pass,
+        )
+    }
+
+    /// Lux fork (additive): the shared wgpu device + queue, so an embedded
+    /// engine (chart-engine) can build its `GpuContext` on the SAME device
+    /// GPUI renders with — the WebGPU shared-device zero-copy path (WebGPU
+    /// forbids cross-`GPUDevice` texture use, so the device must be shared).
+    #[cfg(not(target_os = "macos"))]
+    pub fn shared_gpu(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, wgpu::Adapter) {
+        let r = self.resources();
+        (Arc::clone(&r.device), Arc::clone(&r.queue), r.adapter.clone())
+    }
+
+    /// Lux fork (additive): composite externally-owned RGBA `wgpu::Texture`s
+    /// (embedded chart-engine frames) zero-copy. Reuses `vs_surface` + the
+    /// surfaces bind-group layout with the non-YUV `fs_external_texture`.
+    #[cfg(not(target_os = "macos"))]
+    fn draw_external_textures(
+        &self,
+        textures: &[PaintExternalTexture],
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        if textures.is_empty() {
+            return true;
+        }
+        let resources = self.resources();
+        let device = &resources.device;
+        for external in textures {
+            let params = SurfaceParams {
+                bounds: external.bounds.into(),
+                content_mask: external.content_mask.bounds.into(),
+            };
+            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("external_texture_params"),
+                size: std::mem::size_of::<SurfaceParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM,
+                mapped_at_creation: true,
+            });
+            uniform
+                .slice(..)
+                .get_mapped_range_mut()
+                .copy_from_slice(bytemuck::bytes_of(&params));
+            uniform.unmap();
+
+            let view = external
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("external_texture_bind_group"),
+                layout: &resources.bind_group_layouts.surfaces,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform.as_entire_binding(),
+                    },
+                    // b1 (t_y) is the sampled texture; b2 (t_cb_cr) is bound to
+                    // the same view to satisfy the reused surfaces layout but is
+                    // ignored by fs_external_texture.
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&resources.atlas_sampler),
+                    },
+                ],
+            });
+
+            pass.set_pipeline(&resources.pipelines.external_textures);
+            pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+            pass.set_bind_group(1, &bind_group, &[]);
+            pass.draw(0..4, 0..1);
+        }
+        true
+    }
+
+    fn draw_polychrome_sprites(
+        &self,
+        sprites: &[PolychromeSprite],
+        texture_id: AtlasTextureId,
+        instance_offset: &mut u64,
+        pass: &mut wgpu::RenderPass<'_>,
+    ) -> bool {
+        let tex_info = self.atlas.get_texture_info(texture_id);
+        let data = unsafe { Self::instance_bytes(sprites) };
+        self.draw_instances_with_texture(
+            data,
+            sprites.len() as u32,
+            &tex_info.view,
+            &self.resources().pipelines.poly_sprites,
+            instance_offset,
+            pass,
+        )
     }
 
     fn draw_instances(

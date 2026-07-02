@@ -2174,6 +2174,67 @@ impl Interactivity {
                         .insert(debug_selector.clone(), bounds);
                 }
 
+                // Layout-dump capture: when a dump is active, record this
+                // element's source location, bounds, and resolved style. Placed
+                // here because `style`, `bounds`, and `_inspector_id` are all in
+                // scope, mirroring the `debug_bounds` recording above. Gated by
+                // the same cfg that populates `_inspector_id`, so no new feature
+                // flag is introduced.
+                #[cfg(any(feature = "inspector", debug_assertions))]
+                if window.layout_dump.is_some() {
+                    // Effective font: the element's own text refinement wins,
+                    // otherwise the inherited style already on the window stack.
+                    let font_family = style
+                        .text_style()
+                        .and_then(|text| text.font_family.clone())
+                        .map(|family| family.to_string())
+                        .or_else(|| Some(window.text_style().font_family.to_string()));
+
+                    // Solid background as `#rrggbbaa`, if the element has one.
+                    let bg = style.background.as_ref().and_then(|fill| fill.color()).map(
+                        |background| {
+                            let rgba: crate::Rgba = background.solid.into();
+                            // 255.0 maps the normalized 0.0..=1.0 channels to bytes.
+                            format!(
+                                "#{:02x}{:02x}{:02x}{:02x}",
+                                (rgba.r * 255.0).round() as u8,
+                                (rgba.g * 255.0).round() as u8,
+                                (rgba.b * 255.0).round() as u8,
+                                (rgba.a * 255.0).round() as u8,
+                            )
+                        },
+                    );
+
+                    // Top-left corner radius in pixels, reported only when set.
+                    let radius_px =
+                        style.corner_radii.to_pixels(window.rem_size()).top_left.0;
+                    let radius = (radius_px != 0.0).then_some(radius_px);
+
+                    let (source_location, id_path) = _inspector_id
+                        .map(|inspector_id| {
+                            (
+                                inspector_id.path.source_location.to_string(),
+                                format!("{:?}", inspector_id.path.global_id),
+                            )
+                        })
+                        .unwrap_or_default();
+
+                    window.layout_dump.as_mut().unwrap().push(crate::DumpEntry {
+                        source_location,
+                        id_path,
+                        bounds: (
+                            bounds.origin.x.0,
+                            bounds.origin.y.0,
+                            bounds.size.width.0,
+                            bounds.size.height.0,
+                        ),
+                        font_family,
+                        bg,
+                        radius,
+                        text: None,
+                    });
+                }
+
                 self.paint_hover_group_handler(window, cx);
 
                 if style.visibility == Visibility::Hidden {

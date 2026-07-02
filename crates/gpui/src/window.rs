@@ -982,6 +982,30 @@ enum InputModality {
     Keyboard,
 }
 
+/// A single element captured during a layout dump.
+///
+/// Populated by [`Window::start_layout_dump`] from the paint pass of every
+/// interactive `div`. Fields are public so an app can serialize them without
+/// gpui's internal types; JSON serialization deliberately lives app-side to keep
+/// this fork addition dependency-free.
+#[derive(Debug, Clone)]
+pub struct DumpEntry {
+    /// Source location where the element was constructed (`file:line:col`).
+    pub source_location: String,
+    /// Debug rendering of the element's global id path (may be empty).
+    pub id_path: String,
+    /// Painted bounds as `(origin_x, origin_y, width, height)` in pixels.
+    pub bounds: (f32, f32, f32, f32),
+    /// Effective font family for text painted by this element, if resolvable.
+    pub font_family: Option<String>,
+    /// Solid background color as `#rrggbbaa`, if the element has one.
+    pub bg: Option<String>,
+    /// Top-left corner radius in pixels, if non-zero.
+    pub radius: Option<f32>,
+    /// Text content, when the element exposes it directly (usually `None`).
+    pub text: Option<String>,
+}
+
 /// Holds the state for a specific window.
 pub struct Window {
     pub(crate) handle: AnyWindowHandle,
@@ -1011,6 +1035,9 @@ pub struct Window {
     pub(crate) image_cache_stack: Vec<AnyImageCache>,
     pub(crate) rendered_frame: Frame,
     pub(crate) next_frame: Frame,
+    /// When `Some`, the paint pass records a [`DumpEntry`] per interactive `div`.
+    /// Toggled via [`Window::start_layout_dump`] / [`Window::take_layout_dump`].
+    pub(crate) layout_dump: Option<Vec<DumpEntry>>,
     next_hitbox_id: HitboxId,
     pub(crate) next_tooltip_id: TooltipId,
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
@@ -1707,6 +1734,7 @@ impl Window {
             requested_autoscroll: None,
             rendered_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
             next_frame: Frame::new(DispatchTree::new(cx.keymap.clone(), cx.actions.clone())),
+            layout_dump: None,
             next_frame_callbacks,
             next_hitbox_id: HitboxId(0),
             next_tooltip_id: TooltipId::default(),
@@ -2398,6 +2426,22 @@ impl Window {
     /// UI to scale, just like zooming a web page.
     pub fn set_rem_size(&mut self, rem_size: impl Into<Pixels>) {
         self.rem_size = rem_size.into();
+    }
+
+    /// Begin recording a layout dump on the next paint pass.
+    ///
+    /// While active, each interactive `div` pushes a [`DumpEntry`] describing its
+    /// source location, bounds, and resolved style. Call before triggering a
+    /// draw, then collect with [`Window::take_layout_dump`].
+    pub fn start_layout_dump(&mut self) {
+        self.layout_dump = Some(Vec::new());
+    }
+
+    /// Stop recording and return the entries captured since the dump started.
+    ///
+    /// Returns an empty vec if [`Window::start_layout_dump`] was not called.
+    pub fn take_layout_dump(&mut self) -> Vec<DumpEntry> {
+        self.layout_dump.take().unwrap_or_default()
     }
 
     /// Acquire a globally unique identifier for the given ElementId.

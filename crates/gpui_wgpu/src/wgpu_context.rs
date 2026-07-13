@@ -156,6 +156,15 @@ impl WgpuContext {
             );
         }
 
+        // Request GPU timestamp queries when the adapter supports them (adapter-
+        // masked, so device creation never fails on adapters that lack it). A
+        // consumer rendering on this shared device can then resolve render-pass
+        // GPU timing; without it the device carries no TIMESTAMP_QUERY and any
+        // GPU-time readout stays unavailable.
+        if adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            required_features |= wgpu::Features::TIMESTAMP_QUERY;
+        }
+
         let color_atlas_texture_format = Self::select_color_texture_format(adapter)?;
 
         let (device, queue) = adapter

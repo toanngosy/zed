@@ -52,6 +52,12 @@ pub(crate) struct WebWindowInner {
     pub(crate) callbacks: RefCell<WebWindowCallbacks>,
     pub(crate) click_state: RefCell<ClickState>,
     pub(crate) pressed_button: Cell<Option<MouseButton>>,
+    /// Active touch pointers (`pointerId` → element-local position) tracked for
+    /// multi-touch pinch recognition. Mouse and pen pointers are not tracked.
+    pub(crate) active_touches: RefCell<Vec<(i32, Point<Pixels>)>>,
+    /// Finger separation on the previous pinch move, used to derive the
+    /// per-event magnification delta. `None` while not pinching.
+    pub(crate) pinch_prev_dist: Cell<Option<f32>>,
     pub(crate) last_physical_size: Cell<(u32, u32)>,
     pub(crate) notify_scale: Cell<bool>,
     pub(crate) is_composing: Cell<bool>,
@@ -130,6 +136,16 @@ impl WebWindow {
         input_style.set_property("opacity", "0").ok();
         body.append_child(&input_element)
             .map_err(|e| anyhow::anyhow!("Failed to append input to body: {e:?}"))?;
+        // The hidden input is focused on every pointerdown to capture keys/IME.
+        // On a touch device focusing an editable `<input>` pops the soft
+        // keyboard, so it starts non-editable: `readonly` reliably suppresses
+        // the keyboard on focus while still delivering physical keydowns, and
+        // `inputmode=none` is a secondary hint. `set_input_handler` /
+        // `take_input_handler` flip this as text fields gain/lose focus, so a
+        // real text field (e.g. a ticker search) still brings up the keyboard.
+        // `inputmode=none` alone is unreliable on iOS Safari, hence `readonly`
+        // is the primary lever (mdn/browser-compat-data#7186).
+        set_input_editable(&input_element, false);
         input_element.focus().ok();
 
         let device_size = Size {
@@ -179,6 +195,8 @@ impl WebWindow {
             callbacks: RefCell::new(WebWindowCallbacks::default()),
             click_state: RefCell::new(ClickState::default()),
             pressed_button: Cell::new(None),
+            active_touches: RefCell::new(Vec::new()),
+            pinch_prev_dist: Cell::new(None),
             last_physical_size: Cell::new((0, 0)),
             notify_scale: Cell::new(false),
             is_composing: Cell::new(false),
@@ -441,6 +459,18 @@ impl WebWindowInner {
     }
 }
 
+/// Toggle whether the hidden capture `<input>` can raise the mobile keyboard.
+///
+/// When `editable` is `false` the input is `readonly` with `inputmode=none`, so
+/// focusing it (which GPUI does on every pointerdown) does not pop the soft
+/// keyboard — the desired state for chart interaction. When a text field is
+/// focused it is made editable with `inputmode=text` so typing and IME work.
+fn set_input_editable(input_element: &web_sys::HtmlInputElement, editable: bool) {
+    input_element.set_read_only(!editable);
+    let inputmode = if editable { "text" } else { "none" };
+    input_element.set_attribute("inputmode", inputmode).ok();
+}
+
 fn current_appearance(browser_window: &web_sys::Window) -> WindowAppearance {
     let is_dark = browser_window
         .match_media("(prefers-color-scheme: dark)")
@@ -556,10 +586,20 @@ impl PlatformWindow for WebWindow {
     }
 
     fn set_input_handler(&mut self, input_handler: PlatformInputHandler) {
+        // A focused text field claims the hidden input — make it editable so the
+        // mobile soft keyboard appears and typing/IME works. GPUI borrows the
+        // handler out and back during each draw via `take`/`set`, so the steady
+        // state is what matters: a live handler ends on `set` (editable).
+        set_input_editable(&self.inner.input_element, true);
         self.inner.state.borrow_mut().input_handler = Some(input_handler);
     }
 
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
+        // Revert to non-editable when no text field owns the input, so a chart
+        // tap can't pop the keyboard. During GPUI's draw-time borrow the handler
+        // is `set` back immediately after, restoring editability; only a genuine
+        // defocus leaves it non-editable.
+        set_input_editable(&self.inner.input_element, false);
         self.inner.state.borrow_mut().input_handler.take()
     }
 

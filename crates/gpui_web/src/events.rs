@@ -3,8 +3,8 @@ use std::rc::Rc;
 use gpui::{
     Capslock, DispatchEventResult, ExternalPaths, FileDropEvent, KeyDownEvent, KeyUpEvent,
     Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent,
-    MouseMoveEvent, MouseUpEvent, NavigationDirection, Pixels, PlatformInput, Point, ScrollDelta,
-    ScrollWheelEvent, TouchPhase, point, px,
+    MouseMoveEvent, MouseUpEvent, NavigationDirection, PinchEvent, Pixels, PlatformInput, Point,
+    ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
 };
 use smallvec::smallvec;
 use wasm_bindgen::prelude::*;
@@ -56,6 +56,7 @@ impl WebWindowInner {
             self.register_pointer_down(),
             self.register_pointer_up(),
             self.register_pointer_move(),
+            self.register_pointer_cancel(),
             self.register_pointer_leave(),
             self.register_wheel(),
             self.register_context_menu(),
@@ -136,9 +137,29 @@ impl WebWindowInner {
             event.prevent_default();
             this.input_element.focus().ok();
 
-            let button = dom_mouse_button_to_gpui(event.button());
             let position = pointer_position_in_element(&event);
             let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
+
+            // Multi-touch pinch: track each touch pointer. A second finger
+            // starts a pinch gesture rather than a second press — suppress the
+            // `MouseDown` so the finger cannot also begin a pan.
+            if is_touch_pointer(&event) {
+                this.touch_upsert(event.pointer_id(), position);
+                if let Some((center, dist)) = this.pinch_geometry() {
+                    this.pinch_prev_dist.set(Some(dist));
+                    this.dispatch_input(PlatformInput::Pinch(PinchEvent {
+                        position: center,
+                        // Started carries no zoom; the consumer uses it to close
+                        // out the first finger's pending press before zooming.
+                        delta: 0.0,
+                        modifiers,
+                        phase: TouchPhase::Started,
+                    }));
+                    return;
+                }
+            }
+
+            let button = dom_mouse_button_to_gpui(event.button());
             let time = js_sys::Date::now();
 
             this.pressed_button.set(Some(button));
@@ -166,9 +187,30 @@ impl WebWindowInner {
             let event: web_sys::PointerEvent = event.unchecked_into();
             event.prevent_default();
 
-            let button = dom_mouse_button_to_gpui(event.button());
             let position = pointer_position_in_element(&event);
             let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
+
+            // Lifting a finger out of a pinch ends the pinch. Do NOT turn it
+            // into a `MouseUp`: the pressed finger was suppressed at `Down`, so
+            // an up here would read downstream as a spurious tap.
+            if is_touch_pointer(&event) {
+                let was_pinching = this.active_touches.borrow().len() >= 2;
+                this.touch_remove(event.pointer_id());
+                if was_pinching {
+                    if this.active_touches.borrow().len() < 2 {
+                        this.pinch_prev_dist.set(None);
+                        this.dispatch_input(PlatformInput::Pinch(PinchEvent {
+                            position,
+                            delta: 0.0,
+                            modifiers,
+                            phase: TouchPhase::Ended,
+                        }));
+                    }
+                    return;
+                }
+            }
+
+            let button = dom_mouse_button_to_gpui(event.button());
 
             this.pressed_button.set(None);
             let click_count = this.click_state.borrow().current_count;
@@ -196,6 +238,33 @@ impl WebWindowInner {
 
             let position = pointer_position_in_element(&event);
             let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
+
+            // Keep tracked touch positions current so pinch geometry is
+            // accurate the instant a second finger joins an in-progress drag.
+            if is_touch_pointer(&event) {
+                this.touch_upsert(event.pointer_id(), position);
+            }
+
+            // Two fingers down → emit an incremental pinch (magnification delta
+            // relative to the previous separation) and suppress the pan so the
+            // gesture zooms instead of dragging the view.
+            if is_touch_pointer(&event) && this.active_touches.borrow().len() >= 2 {
+                if let Some((center, dist)) = this.pinch_geometry() {
+                    if let Some(prev) = this.pinch_prev_dist.get() {
+                        if prev > f32::EPSILON {
+                            this.dispatch_input(PlatformInput::Pinch(PinchEvent {
+                                position: center,
+                                delta: dist / prev - 1.0,
+                                modifiers,
+                                phase: TouchPhase::Moved,
+                            }));
+                        }
+                    }
+                    this.pinch_prev_dist.set(Some(dist));
+                }
+                return;
+            }
+
             let current_pressed = this.pressed_button.get();
 
             {
@@ -210,6 +279,53 @@ impl WebWindowInner {
                 modifiers,
             }));
         })
+    }
+
+    /// Drop a cancelled touch (system gesture interruption, e.g. the browser
+    /// claims the gesture) so a stale pointer cannot wedge pinch mode on.
+    fn register_pointer_cancel(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
+        let this = Rc::clone(self);
+        self.listen("pointercancel", move |event: JsValue| {
+            let event: web_sys::PointerEvent = event.unchecked_into();
+            if is_touch_pointer(&event) {
+                this.touch_remove(event.pointer_id());
+                if this.active_touches.borrow().len() < 2 {
+                    this.pinch_prev_dist.set(None);
+                }
+            }
+        })
+    }
+
+    /// Insert or update a tracked touch pointer's element-local position.
+    fn touch_upsert(&self, id: i32, pos: Point<Pixels>) {
+        let mut touches = self.active_touches.borrow_mut();
+        if let Some(entry) = touches.iter_mut().find(|(tid, _)| *tid == id) {
+            entry.1 = pos;
+        } else {
+            touches.push((id, pos));
+        }
+    }
+
+    /// Remove a tracked touch pointer by its `pointerId`.
+    fn touch_remove(&self, id: i32) {
+        self.active_touches.borrow_mut().retain(|(tid, _)| *tid != id);
+    }
+
+    /// Pinch centroid and finger separation from the first two active touches.
+    ///
+    /// Returns `None` unless at least two touches are down.
+    fn pinch_geometry(&self) -> Option<(Point<Pixels>, f32)> {
+        let touches = self.active_touches.borrow();
+        if touches.len() < 2 {
+            return None;
+        }
+        let a = touches[0].1;
+        let b = touches[1].1;
+        let (ax, ay) = (f32::from(a.x), f32::from(a.y));
+        let (bx, by) = (f32::from(b.x), f32::from(b.y));
+        let center = point(px((ax + bx) / 2.0), px((ay + by) / 2.0));
+        let (dx, dy) = (bx - ax, by - ay);
+        Some((center, (dx * dx + dy * dy).sqrt()))
     }
 
     fn register_pointer_leave(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
@@ -551,6 +667,10 @@ fn dom_key_to_gpui_key(event: &web_sys::KeyboardEvent) -> String {
             other.to_lowercase()
         }
     }
+}
+
+fn is_touch_pointer(event: &web_sys::PointerEvent) -> bool {
+    event.pointer_type() == "touch"
 }
 
 fn dom_mouse_button_to_gpui(button: i16) -> MouseButton {

@@ -209,6 +209,24 @@ impl Application {
         }));
     }
 
+    /// Like [`Self::run`], but leaks one strong reference so the `App` lives for
+    /// the process lifetime.
+    ///
+    /// Host-driven platforms (web, iOS) return from `Platform::run` immediately
+    /// rather than owning a blocking run loop, so on those the `Application`
+    /// value is dropped as soon as this call returns — taking the `App` and its
+    /// windows with it (the frame pump then upgrades a released `Weak<AppCell>`
+    /// and no-ops). Retaining one strong reference keeps the `App` alive until
+    /// the process exits, which is the intended lifetime for a single-window
+    /// mobile/web app.
+    pub fn run_retained<F>(self, on_finish_launching: F)
+    where
+        F: 'static + FnOnce(&mut App),
+    {
+        std::mem::forget(self.0.clone());
+        self.run(on_finish_launching);
+    }
+
     /// Register a handler to be invoked when the platform instructs the application
     /// to open one or more URLs.
     pub fn on_open_urls<F>(&self, mut callback: F) -> &Self

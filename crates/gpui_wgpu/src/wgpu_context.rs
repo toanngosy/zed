@@ -167,13 +167,23 @@ impl WgpuContext {
 
         let color_atlas_texture_format = Self::select_color_texture_format(adapter)?;
 
+        // GPUI itself renders fine at downlevel limits, but this device may be
+        // SHARED with an embedded engine (chart-engine) via `shared_gpu()`. That
+        // engine's colormap LUT is a 32KB uniform buffer, which exceeds the
+        // downlevel `max_uniform_buffer_binding_size` (16KB) and makes its bind
+        // group invalid. Raise just that limit to the adapter's max so the
+        // shared-device path satisfies the embedded engine.
+        let mut required_limits = wgpu::Limits::downlevel_defaults()
+            .using_resolution(adapter.limits())
+            .using_alignment(adapter.limits());
+        required_limits.max_uniform_buffer_binding_size =
+            adapter.limits().max_uniform_buffer_binding_size;
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("gpui_device"),
                 required_features,
-                required_limits: wgpu::Limits::downlevel_defaults()
-                    .using_resolution(adapter.limits())
-                    .using_alignment(adapter.limits()),
+                required_limits,
                 memory_hints: wgpu::MemoryHints::MemoryUsage,
                 trace: wgpu::Trace::Off,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),

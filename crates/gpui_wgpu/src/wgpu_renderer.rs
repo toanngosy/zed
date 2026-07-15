@@ -246,6 +246,73 @@ impl WgpuRenderer {
         )
     }
 
+    /// Lux fork (additive, iOS): build a renderer whose surface targets a
+    /// `CAMetalLayer` directly (`SurfaceTargetUnsafe::CoreAnimationLayer`).
+    ///
+    /// The generic [`Self::new`] path takes a `HasWindowHandle` and produces a
+    /// `UiKitWindowHandle` (a `UIView`); on the iOS **Simulator** wgpu rejects
+    /// that with "No DisplayHandle is available". Handing wgpu the layer pointer
+    /// directly — the same path chart-engine's `GpuContext::from_ios` uses and
+    /// the only one proven to work in the Simulator — avoids the window/display
+    /// handle entirely. Builds a Metal `wgpu::Instance` (the shared
+    /// `WgpuContext::instance()` is Vulkan/GL only) and seeds `gpu_context`.
+    ///
+    /// # Safety
+    /// `metal_layer` must be a valid `CAMetalLayer *` that outlives the renderer.
+    #[cfg(target_os = "ios")]
+    pub unsafe fn new_from_metal_layer(
+        gpu_context: GpuContext,
+        metal_layer: *mut std::ffi::c_void,
+        config: WgpuSurfaceConfig,
+        compositor_gpu: Option<CompositorGpuHint>,
+    ) -> anyhow::Result<Self> {
+        let make_surface = |instance: &wgpu::Instance| -> anyhow::Result<wgpu::Surface<'static>> {
+            let target = wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(metal_layer);
+            // SAFETY: caller guarantees the layer outlives the renderer.
+            unsafe {
+                instance
+                    .create_surface_unsafe(target)
+                    .map_err(|e| anyhow::anyhow!("failed to create Metal surface: {e}"))
+            }
+        };
+
+        let instance = gpu_context
+            .borrow()
+            .as_ref()
+            .map(|ctx| ctx.instance.clone())
+            .unwrap_or_else(|| {
+                wgpu::Instance::new(wgpu::InstanceDescriptor {
+                    backends: wgpu::Backends::METAL,
+                    flags: wgpu::InstanceFlags::default(),
+                    backend_options: wgpu::BackendOptions::default(),
+                    memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+                    display: None,
+                })
+            });
+
+        let surface = make_surface(&instance)?;
+
+        let mut ctx_ref = gpu_context.borrow_mut();
+        let context = match ctx_ref.as_mut() {
+            Some(context) => {
+                context.check_compatible_with_surface(&surface)?;
+                context
+            }
+            None => ctx_ref.insert(WgpuContext::new(instance, &surface, compositor_gpu)?),
+        };
+
+        let atlas = Arc::new(WgpuAtlas::from_context(context));
+
+        Self::new_internal(
+            Some(Rc::clone(&gpu_context)),
+            context,
+            surface,
+            config,
+            compositor_gpu,
+            atlas,
+        )
+    }
+
     #[cfg(target_family = "wasm")]
     pub fn new_from_canvas(
         context: &WgpuContext,

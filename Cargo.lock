@@ -7801,9 +7801,27 @@ dependencies = [
  "waker-fn",
  "wasm-bindgen",
  "web-time",
+ "wgpu",
  "windows 0.61.3",
  "zed-font-kit",
  "zed-scap",
+]
+
+[[package]]
+name = "gpui_ios"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dispatch2",
+ "futures 0.3.32",
+ "gpui",
+ "gpui_wgpu",
+ "libc",
+ "log",
+ "parking_lot",
+ "raw-window-handle",
+ "uuid",
+ "wgpu",
 ]
 
 [[package]]
@@ -7919,6 +7937,7 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "gpui",
+ "gpui_ios",
  "gpui_linux",
  "gpui_macos",
  "gpui_web",
@@ -7973,6 +7992,7 @@ dependencies = [
  "wasm_thread",
  "web-sys",
  "web-time",
+ "wgpu",
 ]
 
 [[package]]

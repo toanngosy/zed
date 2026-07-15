@@ -6851,6 +6851,7 @@ mod tests {
             position: tab_c_bounds.center(),
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::default(),
+            is_touch: false,
         });
         cx.run_until_parked();
         cx.simulate_event(MouseUpEvent {
@@ -6926,6 +6927,7 @@ mod tests {
             position: tab_c_bounds.center(),
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::default(),
+            is_touch: false,
         });
         cx.run_until_parked();
         cx.simulate_event(MouseUpEvent {
@@ -6978,6 +6980,7 @@ mod tests {
             position: tab_c_bounds.center(),
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::default(),
+            is_touch: false,
         });
         cx.run_until_parked();
         cx.simulate_event(MouseUpEvent {
@@ -7045,6 +7048,7 @@ mod tests {
             position: tab_e_bounds.center(),
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::default(),
+            is_touch: false,
         });
         cx.run_until_parked();
         cx.simulate_event(MouseUpEvent {

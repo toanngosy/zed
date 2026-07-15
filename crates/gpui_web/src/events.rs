@@ -683,6 +683,7 @@ impl WebWindowInner {
                 position,
                 pressed_button: current_pressed,
                 modifiers,
+                is_touch: is_touch_pointer(&event),
             }));
         })
     }

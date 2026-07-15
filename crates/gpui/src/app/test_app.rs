@@ -414,6 +414,7 @@ impl<V: 'static + Render> TestAppWindow<V> {
             position,
             modifiers: Default::default(),
             pressed_button: None,
+            is_touch: false,
         });
     }
 

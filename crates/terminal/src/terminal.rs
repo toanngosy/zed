@@ -4035,6 +4035,23 @@ mod tests {
     }
 
     fn left_mouse_up_at(
+
+    fn ctrl_mouse_move_to(
+        terminal: &mut Terminal,
+        position: GpuiPoint<Pixels>,
+        cx: &mut Context<Terminal>,
+    ) {
+        let terminal_bounds = terminal.last_content.terminal_bounds.bounds;
+        let drag_event = MouseMoveEvent {
+            position,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::secondary_key(),
+            is_touch: false,
+        };
+        terminal.mouse_drag(&drag_event, terminal_bounds, cx);
+    }
+
+    fn ctrl_mouse_up_at(
         terminal: &mut Terminal,
         position: GpuiPoint<Pixels>,
         cx: &mut Context<Terminal>,

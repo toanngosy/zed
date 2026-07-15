@@ -267,6 +267,7 @@ impl VisualTestAppContext {
                 position,
                 modifiers,
                 pressed_button: button.into(),
+                is_touch: false,
             },
         );
     }

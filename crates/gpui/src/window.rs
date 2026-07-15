@@ -5777,6 +5777,7 @@ impl Window {
                         position,
                         pressed_button: Some(MouseButton::Left),
                         modifiers: Modifiers::default(),
+                        is_touch: false,
                     })
                 }
                 FileDropEvent::Pending { position } => {
@@ -5785,6 +5786,7 @@ impl Window {
                         position,
                         pressed_button: Some(MouseButton::Left),
                         modifiers: Modifiers::default(),
+                        is_touch: false,
                     })
                 }
                 FileDropEvent::Submit { position } => {
@@ -7411,6 +7413,7 @@ impl Window {
             position,
             modifiers: self.modifiers,
             pressed_button: None,
+            is_touch: false,
         });
         let _ = self.dispatch_event(event, cx);
     }

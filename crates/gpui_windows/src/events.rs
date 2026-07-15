@@ -323,6 +323,7 @@ impl WindowsWindowInner {
             position: logical_point(x, y, scale_factor),
             pressed_button,
             modifiers: current_modifiers(),
+            is_touch: false,
         });
         let handled = !func(input).propagate;
         self.state.callbacks.input.set(Some(func));
@@ -966,6 +967,7 @@ impl WindowsWindowInner {
             position: logical_point(cursor_point.x as f32, cursor_point.y as f32, scale_factor),
             pressed_button: None,
             modifiers: current_modifiers(),
+            is_touch: false,
         });
         let handled = !func(input).propagate;
         self.state.callbacks.input.set(Some(func));

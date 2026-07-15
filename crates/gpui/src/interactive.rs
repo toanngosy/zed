@@ -406,6 +406,12 @@ pub struct MouseMoveEvent {
 
     /// The modifiers that were held down when the mouse was moved.
     pub modifiers: Modifiers,
+
+    /// Whether this event originated from a touch pointer (finger) rather than
+    /// a mouse or pen. Only the web backend distinguishes this today; native
+    /// backends leave it `false`. Consumers use it to suppress mouse-only
+    /// affordances (e.g. hover crosshair) on touch.
+    pub is_touch: bool,
 }
 
 impl Sealed for MouseMoveEvent {}

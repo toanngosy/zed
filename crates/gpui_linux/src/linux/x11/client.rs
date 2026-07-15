@@ -1265,6 +1265,7 @@ impl X11Client {
                         position,
                         pressed_button,
                         modifiers,
+                        is_touch: false,
                     }));
                 }
 

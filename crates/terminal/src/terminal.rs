@@ -3071,6 +3071,7 @@ mod tests {
             position,
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::secondary_key(),
+            is_touch: false,
         };
         terminal.mouse_drag(&drag_event, terminal_bounds, cx);
     }

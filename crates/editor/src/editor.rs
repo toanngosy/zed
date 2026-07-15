@@ -10203,6 +10203,7 @@ impl Editor {
                         position: window.mouse_position(),
                         pressed_button: None,
                         modifiers: window.modifiers(),
+                        is_touch: false,
                     },
                     &position_map,
                     None,

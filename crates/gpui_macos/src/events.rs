@@ -306,6 +306,7 @@ pub(crate) unsafe fn platform_input_from_native(
                             window_height - px(native_event.locationInWindow().y as f32),
                         ),
                         modifiers: read_modifiers(native_event),
+                        is_touch: false,
                     })
                 })
             }
@@ -317,6 +318,7 @@ pub(crate) unsafe fn platform_input_from_native(
                     ),
                     pressed_button: None,
                     modifiers: read_modifiers(native_event),
+                    is_touch: false,
                 })
             }),
             NSEventType::NSMouseExited => window_height.map(|window_height| {

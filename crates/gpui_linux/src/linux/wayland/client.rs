@@ -1881,6 +1881,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                         position: state.mouse_location.unwrap(),
                         pressed_button: state.button_pressed,
                         modifiers: state.modifiers,
+                        is_touch: false,
                     });
                     drop(state);
                     window.handle_input(input);

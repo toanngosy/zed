@@ -1,0 +1,36 @@
+[package]
+name = "gpui_ios"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+autoexamples = false
+
+# SPIKE (spike/gpui-ios-poc): minimal, reference-only-derived iOS GPUI backend
+# for the GO/NO-GO PoC (issue #1325 de-risk). Written from scratch against the
+# fork's `gpui_web`/`gpui_wgpu` (Apache-2.0), learning the HOW from the
+# disjunctively-licensed `references/gpui-mobile` (we elect Apache-2.0). NOT the
+# production backend — only what the two PoC questions (run-loop + shared_wgpu
+# chart embed) need. See plans/260715-gpui-ios-poc.
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/gpui_ios.rs"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+gpui.workspace = true
+gpui_wgpu.workspace = true
+# Lux fork (additive): name `wgpu::Device`/`Queue`/`Adapter`/`Instance` for the
+# Metal surface + the shared_wgpu accessor (chart-engine zero-copy embed).
+wgpu.workspace = true
+raw-window-handle = "0.6"
+anyhow.workspace = true
+futures.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+libc.workspace = true
+uuid.workspace = true
+# GCD (libdispatch) — identical on iOS and macOS; same crate `gpui_macos` uses.
+dispatch2 = "0.3.1"

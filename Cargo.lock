@@ -7455,6 +7455,10 @@ dependencies = [
  "web-sys",
  "web-time",
  "windows 0.62.2",
+
+ "wgpu",
+ "windows 0.61.3",
+ "zed-font-kit",
  "zed-scap",
 ]
 
@@ -7496,6 +7500,21 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.17",
  "zed-font-kit",
+
+name = "gpui_ios"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dispatch2",
+ "futures 0.3.32",
+ "gpui",
+ "gpui_wgpu",
+ "libc",
+ "log",
+ "parking_lot",
+ "raw-window-handle",
+ "uuid",
+ "wgpu",
 ]
 
 [[package]]
@@ -7602,6 +7621,7 @@ dependencies = [
  "console_error_panic_hook",
  "criterion",
  "gpui",
+ "gpui_ios",
  "gpui_linux",
  "gpui_macos",
  "gpui_web",
@@ -7663,6 +7683,7 @@ dependencies = [
  "wasm_thread",
  "web-sys",
  "web-time",
+ "wgpu",
 ]
 
 [[package]]

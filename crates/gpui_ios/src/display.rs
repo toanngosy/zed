@@ -9,6 +9,15 @@
 use anyhow::Result;
 use gpui::{Bounds, DisplayId, Pixels, PlatformDisplay, Point, Size, px};
 
+/// Stable identity for the single logical iOS display.
+///
+/// GPUI keys displays by their `uuid`, so a fixed value keeps the identity
+/// constant across boots and rotations. The spike used `Uuid::new_v4()`, which
+/// minted a fresh id every boot — the opposite of the "deterministic id" the
+/// comment claimed; this constant delivers the stability that was intended.
+const IOS_DISPLAY_UUID: uuid::Uuid =
+    uuid::Uuid::from_u128(0x105a_fe10_105a_fe10_105a_fe10_105a_fe10);
+
 /// One logical iOS display, sized from the host-provided bounds.
 #[derive(Debug)]
 pub(crate) struct IosDisplay {
@@ -22,8 +31,7 @@ impl IosDisplay {
     pub(crate) fn new(width: f32, height: f32) -> Self {
         Self {
             id: DisplayId::new(1),
-            // Deterministic per-size id so repeated boots are stable.
-            uuid: uuid::Uuid::new_v4(),
+            uuid: IOS_DISPLAY_UUID,
             size: Size {
                 width: px(width),
                 height: px(height),

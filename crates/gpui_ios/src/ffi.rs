@@ -17,8 +17,8 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 use gpui::{
-    App, AppContext, Application, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Point,
-    px,
+    App, AppContext, Application, Edges, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
+    PlatformInput, Point, px,
 };
 
 use crate::platform::IosPlatform;
@@ -42,6 +42,11 @@ thread_local! {
     static WINDOW_STATE: RefCell<Option<Rc<IosWindowState>>> = const { RefCell::new(None) };
     /// The consumer's root-view builder, invoked inside the run closure.
     static APP_CALLBACK: RefCell<Option<Box<dyn FnOnce(&mut App)>>> = const { RefCell::new(None) };
+    /// The latest UIKit safe-area insets (logical points), pushed by the host on
+    /// `viewDidLayoutSubviews` / `safeAreaInsetsDidChange`. Zero until the first
+    /// report; read each frame by shell code through [`safe_area_insets`]. Not a
+    /// `const` initializer because `Edges::default()` is not `const`.
+    static SAFE_AREA_INSETS: RefCell<Edges<Pixels>> = RefCell::new(Edges::default());
 }
 
 /// Register the consumer's root-view builder. Call before [`boot`].
@@ -179,4 +184,31 @@ pub fn set_active(active: bool) {
             state.notify_active(active);
         }
     });
+}
+
+/// Push the current safe-area insets (logical points) from the host.
+///
+/// Called on `viewDidLayoutSubviews` / `safeAreaInsetsDidChange`. UIKit reports
+/// `UIView.safeAreaInsets` in points (already scale-independent), so the values
+/// map directly to GPUI's logical [`Pixels`] with no scale division. Argument
+/// order mirrors [`Edges`] (`top`, `right`, `bottom`, `left`).
+pub fn set_safe_area_insets(top: f32, right: f32, bottom: f32, left: f32) {
+    SAFE_AREA_INSETS.with(|c| {
+        *c.borrow_mut() = Edges {
+            top: px(top),
+            right: px(right),
+            bottom: px(bottom),
+            left: px(left),
+        };
+    });
+}
+
+/// The safe-area insets the host last reported (logical points), or zero before
+/// the first report.
+///
+/// Shell code reads this each frame to keep its chrome clear of the status bar /
+/// Dynamic Island / home indicator. Main-thread only (like every FFI entry
+/// here), so it is safe to call from `render`.
+pub fn safe_area_insets() -> Edges<Pixels> {
+    SAFE_AREA_INSETS.with(|c| c.borrow().clone())
 }

@@ -26,7 +26,9 @@
 mod dispatcher;
 mod display;
 mod ffi;
+mod momentum;
 mod platform;
+mod touch;
 mod window;
 
 pub use ffi::{

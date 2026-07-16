@@ -33,6 +33,8 @@ use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, UiKitDisplayHandle, WindowHandle,
 };
 
+use crate::touch::TouchAggregator;
+
 /// GPUI-registered window callbacks (only the ones the PoC drives are stored).
 #[derive(Default)]
 struct Callbacks {
@@ -52,11 +54,19 @@ pub(crate) struct IosWindowState {
     scale_factor: Cell<f32>,
     mouse_position: Cell<Point<Pixels>>,
     appearance: Cell<WindowAppearance>,
+    /// Multi-touch → `PlatformInput` aggregator (tap / pan / pinch / momentum).
+    touch: RefCell<TouchAggregator>,
 }
 
 impl IosWindowState {
     /// Fire the GPUI frame callback (take-invoke-restore to avoid a live borrow
     /// while GPUI re-enters `draw`). Called once per `CADisplayLink` tick.
+    ///
+    /// The callback is taken out of the `RefCell` for the duration of the call,
+    /// so any re-entrant `request_frame` (GPUI re-driving the pump from inside
+    /// `draw`) finds `None` and no-ops instead of panicking on a double borrow.
+    /// A panic in `cb` leaves the slot empty — acceptable, since a panic here
+    /// aborts anyway (see `ffi` module `# Abort`).
     pub(crate) fn request_frame(&self) {
         let cb = self.callbacks.borrow_mut().request_frame.take();
         if let Some(mut cb) = cb {
@@ -71,6 +81,10 @@ impl IosWindowState {
     }
 
     /// Deliver a synthesized [`PlatformInput`] to GPUI's input sink.
+    ///
+    /// Same take-invoke-restore discipline as [`request_frame`](Self::request_frame):
+    /// the `input` callback is taken while it runs so a re-entrant dispatch
+    /// finds `None` rather than double-borrowing the `RefCell`.
     pub(crate) fn dispatch_input(&self, input: PlatformInput) {
         if let PlatformInput::MouseMove(ref ev) = input {
             self.mouse_position.set(ev.position);
@@ -82,6 +96,32 @@ impl IosWindowState {
         if let Some(mut cb) = cb {
             cb(input);
             self.callbacks.borrow_mut().input = Some(cb);
+        }
+    }
+
+    /// Feed one forwarded touch through the aggregator and dispatch the cooked
+    /// events. Called from the FFI [`crate::touch`] entry each `UITouch`.
+    ///
+    /// The aggregator borrow is released before dispatch so a consumer callback
+    /// cannot observe it mid-borrow.
+    pub(crate) fn dispatch_touch(&self, pointer_id: u64, phase: i32, position: Point<Pixels>) {
+        let inputs = self
+            .touch
+            .borrow_mut()
+            .on_touch(pointer_id, phase, position);
+        for input in inputs {
+            self.dispatch_input(input);
+        }
+    }
+
+    /// Advance an in-flight momentum fling by one frame and dispatch the
+    /// resulting drag-continuation move (or finalizing `MouseUp`). No-op when
+    /// nothing is gliding.
+    pub(crate) fn pump_momentum(&self) {
+        let size = self.bounds.get().size;
+        let inputs = self.touch.borrow_mut().pump_momentum(size);
+        for input in inputs {
+            self.dispatch_input(input);
         }
     }
 
@@ -173,6 +213,7 @@ impl IosWindow {
             scale_factor: Cell::new(scale),
             mouse_position: Cell::new(Point::default()),
             appearance: Cell::new(WindowAppearance::Dark),
+            touch: RefCell::new(TouchAggregator::new()),
         });
 
         Ok(Self { state, display })

@@ -29,5 +29,8 @@ mod ffi;
 mod platform;
 mod window;
 
-pub use ffi::{boot, request_frame, resize, set_active, set_root_view, touch};
+pub use ffi::{
+    boot, request_frame, resize, safe_area_insets, set_active, set_root_view, set_safe_area_insets,
+    touch,
+};
 pub use platform::IosPlatform;

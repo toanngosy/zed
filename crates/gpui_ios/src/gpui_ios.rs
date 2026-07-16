@@ -19,20 +19,35 @@
 
 // Rust guideline compliant 2026-02-21
 
-// The whole crate is iOS-only; on other targets it compiles to nothing (its
-// dependencies are declared only under `cfg(target_os = "ios")`).
-#![cfg(target_os = "ios")]
+// The GPUI/UIKit backend proper is iOS-only: its `gpui_wgpu` Metal surface, GCD
+// dispatcher, and `objc`-shaped FFI have no meaning off-device, so those modules
+// are `cfg(target_os = "ios")`. The `text_seam` module — the portable half of
+// the text-input platform seam (handler storage + keystroke forwarding, no
+// UIKit) — compiles on every target so its headless `#[gpui::test]` runs on the
+// host.
 
+// Portable: the text-input seam's handler storage + forwarding logic.
+mod text_seam;
+
+#[cfg(target_os = "ios")]
 mod dispatcher;
+#[cfg(target_os = "ios")]
 mod display;
+#[cfg(target_os = "ios")]
 mod ffi;
+#[cfg(target_os = "ios")]
 mod momentum;
+#[cfg(target_os = "ios")]
 mod platform;
+#[cfg(target_os = "ios")]
 mod touch;
+#[cfg(target_os = "ios")]
 mod window;
 
+#[cfg(target_os = "ios")]
 pub use ffi::{
-    boot, request_frame, resize, safe_area_insets, set_active, set_root_view, set_safe_area_insets,
-    touch,
+    boot, delete_backward, insert_text, keyboard_caret, keyboard_wanted, request_frame, resize,
+    safe_area_insets, set_active, set_root_view, set_safe_area_insets, touch,
 };
+#[cfg(target_os = "ios")]
 pub use platform::IosPlatform;

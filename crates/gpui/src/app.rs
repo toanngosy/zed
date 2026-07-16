@@ -1790,6 +1790,24 @@ impl App {
         &self.asset_source
     }
 
+    /// Assigns the source of assets after the `App` has been constructed.
+    ///
+    /// This is the in-run equivalent of the builder-style
+    /// [`Application::with_assets`]: it updates the same `asset_source` and
+    /// rebuilds the `SvgRenderer` so subsequently rendered `svg()` elements
+    /// resolve their paths against `asset_source`. It exists for host-driven
+    /// backends (e.g. iOS under `UIApplicationMain`) that construct the
+    /// `Application` internally and only hand the consumer an `&mut App` inside
+    /// the run closure, so `with_assets` is never reachable.
+    ///
+    /// Set the asset source before opening any window whose views render assets,
+    /// so the first paint already resolves them.
+    pub fn set_asset_source(&mut self, asset_source: impl AssetSource) {
+        let asset_source = Arc::new(asset_source);
+        self.asset_source = asset_source.clone();
+        self.svg_renderer = SvgRenderer::new(asset_source);
+    }
+
     /// Accessor for the text system.
     pub fn text_system(&self) -> &Arc<TextSystem> {
         &self.text_system

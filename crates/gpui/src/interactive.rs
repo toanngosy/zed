@@ -408,9 +408,9 @@ pub struct MouseMoveEvent {
     pub modifiers: Modifiers,
 
     /// Whether this event originated from a touch pointer (finger) rather than
-    /// a mouse or pen. Only the web backend distinguishes this today; native
-    /// backends leave it `false`. Consumers use it to suppress mouse-only
-    /// affordances (e.g. hover crosshair) on touch.
+    /// a mouse or pen. The web and iOS (`gpui_ios`) backends set this for
+    /// finger moves; the desktop backends leave it `false`. Consumers use it to
+    /// suppress mouse-only affordances (e.g. hover crosshair) on touch.
     pub is_touch: bool,
 }
 

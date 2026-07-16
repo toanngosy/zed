@@ -9,6 +9,22 @@
 //! The consumer app (e.g. the PoC crate) registers its root view with
 //! [`set_root_view`] and calls [`boot`] from its own `extern "C"` entry; Swift
 //! then calls the `gpui_ios_*` symbols below each frame/touch.
+//!
+//! # Touch ABI
+//!
+//! [`touch`] carries `(pointer_id, phase, x, y, scale)`. `phase` is **our own**
+//! `0/1/2/3` convention (began / moved / ended / cancelled), NOT raw
+//! `UITouchPhase` — the Swift shim MUST translate. `pointer_id` is a stable
+//! per-finger identity so two fingers can be tracked for pinch. The full
+//! contract lives at the aggregator ([`crate::touch`]).
+//!
+//! # Abort
+//!
+//! These functions are reached from the consumer's `extern "C"` trampolines. A
+//! panic that unwinds into a trampoline crosses the C ABI and **aborts** the
+//! process — there is intentionally no `catch_unwind` here, matching
+//! `gpui_macos` / `gpui_web` (neither installs one at its platform boundary).
+//! Keep these paths panic-free.
 
 // Rust guideline compliant 2026-02-21
 
@@ -16,10 +32,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use gpui::{
-    App, AppContext, Application, Edges, MouseButton, MouseDownEvent, MouseUpEvent, Pixels,
-    PlatformInput, Point, px,
-};
+use gpui::{App, AppContext, Application, Edges, Pixels, Point, px};
 
 use crate::platform::IosPlatform;
 use crate::window::IosWindowState;
@@ -122,50 +135,39 @@ pub unsafe fn boot(metal_layer: *mut c_void, physical_w: u32, physical_h: u32, s
 
 /// CADisplayLink tick: render one frame.
 ///
+/// Pumps any in-flight momentum fling first (so a synthetic drag-continuation
+/// move is applied before this frame draws), then renders.
+///
 /// Exposed as a plain Rust fn (not `extern "C"`): the final `staticlib` (the
 /// PoC crate) provides the `#[no_mangle]` wrapper, guaranteeing the C symbol
 /// survives linking instead of being stripped from a dependency rlib.
 pub fn request_frame() {
     WINDOW_STATE.with(|c| {
         if let Some(state) = c.borrow().as_ref() {
+            state.pump_momentum();
             state.request_frame();
         }
     });
 }
 
-/// Touch event forwarded from Swift, in physical pixels. `phase`: 0=began,
-/// 1=moved, 2=ended/cancelled. Began→`MouseDown`, ended→`MouseUp` (enough to
-/// fire a GPUI click and prove the input path).
-pub fn touch(phase: i32, x: f32, y: f32, scale: f32) {
+/// Touch event forwarded from Swift, in physical pixels.
+///
+/// `pointer_id` is a stable per-finger identity; `phase` is the
+/// began/moved/ended/cancelled convention documented on [`crate::touch`]. The
+/// aggregator turns the multi-touch stream into the cooked [`gpui::PlatformInput`]
+/// events (one-finger mouse sequence, two-finger pinch, fling momentum).
+pub fn touch(pointer_id: u64, phase: i32, x: f32, y: f32, scale: f32) {
     let scale = if scale > 0.0 { scale } else { 1.0 };
     // GPUI works in logical pixels; the host sends physical, so divide by scale.
     let position = Point {
         x: px(x / scale),
         y: px(y / scale),
     };
-    let input = match phase {
-        0 => Some(PlatformInput::MouseDown(MouseDownEvent {
-            button: MouseButton::Left,
-            position,
-            modifiers: Default::default(),
-            click_count: 1,
-            first_mouse: true,
-        })),
-        2 => Some(PlatformInput::MouseUp(MouseUpEvent {
-            button: MouseButton::Left,
-            position,
-            modifiers: Default::default(),
-            click_count: 1,
-        })),
-        _ => None,
-    };
-    if let Some(input) = input {
-        WINDOW_STATE.with(|c| {
-            if let Some(state) = c.borrow().as_ref() {
-                state.dispatch_input(input);
-            }
-        });
-    }
+    WINDOW_STATE.with(|c| {
+        if let Some(state) = c.borrow().as_ref() {
+            state.dispatch_touch(pointer_id, phase, position);
+        }
+    });
 }
 
 /// Layout change (rotation / split-screen): reconfigure the drawable.

@@ -18,6 +18,28 @@
 //! per-finger identity so two fingers can be tracked for pinch. The full
 //! contract lives at the aggregator ([`crate::touch`]).
 //!
+//! # Text input ABI
+//!
+//! Text input is a **hybrid pull/push** seam driven by a Swift hidden
+//! `UIKeyInput` responder (the counterpart of `gpui_web`'s hidden `<input>`):
+//!
+//! - **Keyboard show/hide is PULLED.** The host polls [`keyboard_wanted`] once
+//!   per `CADisplayLink` tick and reconciles the responder's first-responder
+//!   state *only on change* (`wanted && !isFirstResponder` → `becomeFirstResponder`;
+//!   `!wanted && isFirstResponder` → `resignFirstResponder`). GPUI take/sets the
+//!   input handler every frame, so a callback would thrash the keyboard — the
+//!   flag is idempotent. See [`crate::text_seam`].
+//! - **Keystrokes are PUSHED.** The responder forwards edits in: [`insert_text`]
+//!   (UTF-8, from `insertText:`) and [`delete_backward`] (from `deleteBackward`),
+//!   which the seam turns into `PlatformInputHandler` edits.
+//! - **Caret rect is PULLED.** [`keyboard_caret`] returns the last
+//!   `update_ime_position` rect (logical pixels) so the host can frame the hidden
+//!   responder at the caret.
+//!
+//! DEFER: marked-text / IME composition (CJK, dead keys) and
+//! grapheme-cluster-aware backspace — basic ASCII insert/delete only
+//! (issue #1453). See [`crate::text_seam`] for the full contract.
+//!
 //! # Abort
 //!
 //! These functions are reached from the consumer's `extern "C"` trampolines. A
@@ -32,7 +54,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use gpui::{App, AppContext, Application, Edges, Pixels, Point, px};
+use gpui::{App, AppContext, Application, Bounds, Edges, Pixels, Point, px};
 
 use crate::platform::IosPlatform;
 use crate::window::IosWindowState;
@@ -213,4 +235,55 @@ pub fn set_safe_area_insets(top: f32, right: f32, bottom: f32, left: f32) {
 /// here), so it is safe to call from `render`.
 pub fn safe_area_insets() -> Edges<Pixels> {
     SAFE_AREA_INSETS.with(|c| c.borrow().clone())
+}
+
+/// Insert host text at the caret (from the Swift `UIKeyInput insertText:`).
+///
+/// `text` is the UTF-8 the responder received; the seam applies it to the
+/// focused field's `PlatformInputHandler`. A no-op when no field is focused.
+pub fn insert_text(text: &str) {
+    WINDOW_STATE.with(|c| {
+        if let Some(state) = c.borrow().as_ref() {
+            state.insert_text(text);
+        }
+    });
+}
+
+/// Delete backward at the caret (from the Swift `UIKeyInput deleteBackward`).
+///
+/// Deletes the selection, or one UTF-16 unit before the caret. A no-op when no
+/// field is focused or nothing precedes the caret.
+pub fn delete_backward() {
+    WINDOW_STATE.with(|c| {
+        if let Some(state) = c.borrow().as_ref() {
+            state.delete_backward();
+        }
+    });
+}
+
+/// Whether a focused text field currently wants the soft keyboard shown.
+///
+/// Pulled by the host each `CADisplayLink` tick to reconcile the hidden
+/// responder's first-responder state (see the module `# Text input ABI`).
+/// `false` before the window opens.
+pub fn keyboard_wanted() -> bool {
+    WINDOW_STATE.with(|c| {
+        c.borrow()
+            .as_ref()
+            .is_some_and(|state| state.wants_keyboard())
+    })
+}
+
+/// The caret rect the shell last reported via `update_ime_position` (logical
+/// pixels), or the origin before any report / before the window opens.
+///
+/// The host frames its hidden `UIKeyInput` responder here so the text-editing
+/// loupe and predictive bar anchor near the caret.
+pub fn keyboard_caret() -> Bounds<Pixels> {
+    WINDOW_STATE.with(|c| {
+        c.borrow()
+            .as_ref()
+            .map(|state| state.ime_caret())
+            .unwrap_or_default()
+    })
 }

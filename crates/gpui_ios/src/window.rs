@@ -33,6 +33,7 @@ use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, UiKitDisplayHandle, WindowHandle,
 };
 
+use crate::text_seam::TextInputState;
 use crate::touch::TouchAggregator;
 
 /// GPUI-registered window callbacks (only the ones the PoC drives are stored).
@@ -56,6 +57,9 @@ pub(crate) struct IosWindowState {
     appearance: Cell<WindowAppearance>,
     /// Multi-touch → `PlatformInput` aggregator (tap / pan / pinch / momentum).
     touch: RefCell<TouchAggregator>,
+    /// Text-input platform seam: the focused field's [`PlatformInputHandler`],
+    /// the pull-model keyboard flag, and the caret rect. See [`TextInputState`].
+    text_input: TextInputState,
 }
 
 impl IosWindowState {
@@ -147,6 +151,28 @@ impl IosWindowState {
         }
     }
 
+    /// Insert host text at the caret (from the Swift `UIKeyInput insertText:`).
+    pub(crate) fn insert_text(&self, text: &str) {
+        self.text_input.insert(text);
+    }
+
+    /// Delete backward at the caret (from the Swift `UIKeyInput deleteBackward`).
+    pub(crate) fn delete_backward(&self) {
+        self.text_input.delete_backward();
+    }
+
+    /// Whether a focused text field currently wants the soft keyboard shown.
+    /// Pulled by the host each `CADisplayLink` tick to reconcile the first
+    /// responder (see [`TextInputState`]).
+    pub(crate) fn wants_keyboard(&self) -> bool {
+        self.text_input.wants_keyboard()
+    }
+
+    /// The last caret rect reported via `update_ime_position` (logical pixels).
+    pub(crate) fn ime_caret(&self) -> Bounds<Pixels> {
+        self.text_input.caret()
+    }
+
     /// Notify GPUI the app moved to fore/background (pause pump in bg).
     pub(crate) fn notify_active(&self, active: bool) {
         let cb = self.callbacks.borrow_mut().active_status_change.take();
@@ -214,6 +240,7 @@ impl IosWindow {
             mouse_position: Cell::new(Point::default()),
             appearance: Cell::new(WindowAppearance::Dark),
             touch: RefCell::new(TouchAggregator::new()),
+            text_input: TextInputState::new(),
         });
 
         Ok(Self { state, display })
@@ -283,10 +310,19 @@ impl PlatformWindow for IosWindow {
         Capslock::default()
     }
 
-    fn set_input_handler(&mut self, _input_handler: PlatformInputHandler) {}
+    fn set_input_handler(&mut self, input_handler: PlatformInputHandler) {
+        // A focused text field claims the seam — store its handler and request
+        // the soft keyboard. GPUI take/sets every draw, so the steady state (a
+        // live handler → keyboard wanted) is what the host polls. Mirrors the
+        // `gpui_web` idempotent set/take toggle. See [`TextInputState`].
+        self.state.text_input.set_handler(input_handler);
+    }
 
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
-        None
+        // Blur (or GPUI's per-frame borrow) drops the keyboard request; a
+        // still-focused field re-installs within the same frame before the host
+        // next polls, so a steady focus never flickers the keyboard.
+        self.state.text_input.take_handler()
     }
 
     fn prompt(
@@ -382,5 +418,11 @@ impl PlatformWindow for IosWindow {
         Some(self.state.renderer.borrow().gpu_specs())
     }
 
-    fn update_ime_position(&self, _bounds: Bounds<Pixels>) {}
+    fn update_ime_position(&self, bounds: Bounds<Pixels>) {
+        // Record the caret rect so the host can frame its hidden `UIKeyInput`
+        // responder at the caret (and a future IME can anchor its candidate
+        // window there). Basic ASCII mode consumes it no further — full IME /
+        // marked-text positioning is deferred (issue #1453).
+        self.state.text_input.set_caret(bounds);
+    }
 }

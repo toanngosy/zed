@@ -19,8 +19,19 @@ workspace = true
 [lib]
 path = "src/gpui_ios.rs"
 
-[target.'cfg(target_os = "ios")'.dependencies]
+# `gpui` is NOT iOS-gated: the platform seam's portable half (`text_seam`, the
+# text-input handler storage + forwarding) compiles and unit-tests on the host
+# so the headless `#[gpui::test]` can run off-device. The heavy iOS-only deps
+# (`gpui_wgpu`, `wgpu`, `dispatch2`, …) stay gated below.
+[dependencies]
 gpui.workspace = true
+
+[dev-dependencies]
+# `test-support` unlocks `TestAppContext` + `#[gpui::test]` for `text_seam`'s
+# headless end-to-end test.
+gpui = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
 gpui_wgpu.workspace = true
 # Lux fork (additive): name `wgpu::Device`/`Queue`/`Adapter`/`Instance` for the
 # Metal surface + the shared_wgpu accessor (chart-engine zero-copy embed).

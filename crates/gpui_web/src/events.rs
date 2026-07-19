@@ -50,6 +50,62 @@ impl ClickState {
     }
 }
 
+/// Minimum drag displacement (logical px) along the dominant axis before a
+/// one-finger scroll commits to that axis. Mirrors the `gpui_ios` backend's
+/// constant so touch and web agree on when a swipe locks.
+const AXIS_LOCK_THRESHOLD_PX: f32 = 8.0;
+
+/// The axis a one-finger scroll has committed to for the rest of a drag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LockedAxis {
+    Horizontal,
+    Vertical,
+}
+
+/// Per-gesture dominant-axis lock for the additive one-finger scroll channel.
+///
+/// A one-finger drag emits a `ScrollWheel` on top of its `MouseMove`. Without a
+/// lock, a diagonal drag over a horizontally-scrolling carousel nested in a
+/// vertically-scrolling sheet scrolls BOTH at once and jitters (issue #1567).
+/// Accumulate the drag displacement and, once it clears
+/// [`AXIS_LOCK_THRESHOLD_PX`], lock to the larger-magnitude axis and zero the
+/// minor component of every later scroll delta. The `MouseMove` channel (chart
+/// pan) stays full 2D. This is the behavioral mirror of the `gpui_ios`
+/// `AxisLock` — kept as a separate copy because the two backends share no crate;
+/// web has no fling/momentum, so there is no locked axis to carry past lift.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct AxisLock {
+    /// Signed drag displacement since the gesture began (logical px).
+    accum_x: f32,
+    accum_y: f32,
+    /// The committed axis, or `None` until the threshold is cleared.
+    locked: Option<LockedAxis>,
+}
+
+impl AxisLock {
+    /// Feed one raw per-step scroll delta; returns the delta to actually emit,
+    /// with the minor axis zeroed once the drag has locked.
+    fn apply(&mut self, dx: f32, dy: f32) -> (f32, f32) {
+        self.accum_x += dx;
+        self.accum_y += dy;
+        if self.locked.is_none() {
+            let (ax, ay) = (self.accum_x.abs(), self.accum_y.abs());
+            if ax.max(ay) >= AXIS_LOCK_THRESHOLD_PX {
+                self.locked = Some(if ax >= ay {
+                    LockedAxis::Horizontal
+                } else {
+                    LockedAxis::Vertical
+                });
+            }
+        }
+        match self.locked {
+            Some(LockedAxis::Horizontal) => (dx, 0.0),
+            Some(LockedAxis::Vertical) => (0.0, dy),
+            None => (dx, dy),
+        }
+    }
+}
+
 impl WebWindowInner {
     pub fn register_event_listeners(self: &Rc<Self>) -> WebEventListeners {
         let mut closures = vec![
@@ -144,6 +200,9 @@ impl WebWindowInner {
             // starts a pinch gesture rather than a second press — suppress the
             // `MouseDown` so the finger cannot also begin a pan.
             if is_touch_pointer(&event) {
+                // Fresh gesture (or a second finger starting a pinch): clear any
+                // dominant-axis lock so this drag picks its own axis.
+                this.touch_axis_lock.set(AxisLock::default());
                 this.touch_upsert(event.pointer_id(), position);
                 if let Some((center, dist)) = this.pinch_geometry() {
                     this.pinch_prev_dist.set(Some(dist));
@@ -194,6 +253,8 @@ impl WebWindowInner {
             // into a `MouseUp`: the pressed finger was suppressed at `Down`, so
             // an up here would read downstream as a spurious tap.
             if is_touch_pointer(&event) {
+                // A lifted finger ends the drag — clear the axis lock either way.
+                this.touch_axis_lock.set(AxisLock::default());
                 let was_pinching = this.active_touches.borrow().len() >= 2;
                 this.touch_remove(event.pointer_id());
                 if was_pinching {
@@ -294,11 +355,19 @@ impl WebWindowInner {
             // Delta = `pos - prev`, the same sign `register_wheel` produces (it
             // negates the browser's inverted convention), so touch and wheel
             // scroll the same direction. Web fling/momentum is a scoped
-            // fast-follow — functional scroll here is intentional v1.
+            // fast-follow — functional scroll here is intentional v1. The delta is
+            // dominant-axis-locked so a diagonal drag doesn't scroll a nested
+            // carousel and its parent sheet at once (issue #1567).
             if let Some(prev) = prev_touch_pos {
+                let mut lock = this.touch_axis_lock.get();
+                let (sdx, sdy) = lock.apply(
+                    f32::from(position.x - prev.x),
+                    f32::from(position.y - prev.y),
+                );
+                this.touch_axis_lock.set(lock);
                 this.dispatch_input(PlatformInput::ScrollWheel(ScrollWheelEvent {
                     position,
-                    delta: ScrollDelta::Pixels(point(position.x - prev.x, position.y - prev.y)),
+                    delta: ScrollDelta::Pixels(point(px(sdx), px(sdy))),
                     modifiers,
                     touch_phase: TouchPhase::Moved,
                     is_touch: true,
@@ -314,6 +383,7 @@ impl WebWindowInner {
         self.listen("pointercancel", move |event: JsValue| {
             let event: web_sys::PointerEvent = event.unchecked_into();
             if is_touch_pointer(&event) {
+                this.touch_axis_lock.set(AxisLock::default());
                 this.touch_remove(event.pointer_id());
                 if this.active_touches.borrow().len() < 2 {
                     this.pinch_prev_dist.set(None);

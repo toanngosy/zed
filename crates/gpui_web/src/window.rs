@@ -1,5 +1,5 @@
 use crate::display::WebDisplay;
-use crate::events::{ClickState, WebEventListeners, is_mac_platform};
+use crate::events::{AxisLock, ClickState, WebEventListeners, is_mac_platform};
 use std::sync::Arc;
 use std::{cell::Cell, cell::RefCell, rc::Rc};
 
@@ -58,6 +58,10 @@ pub(crate) struct WebWindowInner {
     /// Finger separation on the previous pinch move, used to derive the
     /// per-event magnification delta. `None` while not pinching.
     pub(crate) pinch_prev_dist: Cell<Option<f32>>,
+    /// Dominant-axis lock for the current one-finger drag's scroll channel, so a
+    /// diagonal drag doesn't scroll a nested carousel and its parent sheet at
+    /// once (issue #1567). Reset on every touch down / up / cancel.
+    pub(crate) touch_axis_lock: Cell<AxisLock>,
     pub(crate) last_physical_size: Cell<(u32, u32)>,
     pub(crate) notify_scale: Cell<bool>,
     pub(crate) is_composing: Cell<bool>,
@@ -197,6 +201,7 @@ impl WebWindow {
             pressed_button: Cell::new(None),
             active_touches: RefCell::new(Vec::new()),
             pinch_prev_dist: Cell::new(None),
+            touch_axis_lock: Cell::new(AxisLock::default()),
             last_physical_size: Cell::new((0, 0)),
             notify_scale: Cell::new(false),
             is_composing: Cell::new(false),

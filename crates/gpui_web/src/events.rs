@@ -241,9 +241,15 @@ impl WebWindowInner {
 
             // Keep tracked touch positions current so pinch geometry is
             // accurate the instant a second finger joins an in-progress drag.
-            if is_touch_pointer(&event) {
+            // Capture this pointer's PRIOR position before the upsert so a
+            // single-finger drag can emit a `ScrollWheel` delta (`pos - prev`).
+            let prev_touch_pos = if is_touch_pointer(&event) {
+                let prev = this.touch_pos(event.pointer_id());
                 this.touch_upsert(event.pointer_id(), position);
-            }
+                prev
+            } else {
+                None
+            };
 
             // Two fingers down → emit an incremental pinch (magnification delta
             // relative to the previous separation) and suppress the pan so the
@@ -279,6 +285,24 @@ impl WebWindowInner {
                 modifiers,
                 is_touch: is_touch_pointer(&event),
             }));
+
+            // Additive scroll channel: a single-finger drag also feeds gpui
+            // scroll containers (bottom sheets, lists) a `ScrollWheel` so they
+            // scroll on touch. The chart pans off the `MouseMove` above and
+            // ignores touch-phase `ScrollWheel`. `prev_touch_pos` is `Some` only
+            // for a single-finger touch (two-finger returns early as a pinch).
+            // Delta = `pos - prev`, the same sign `register_wheel` produces (it
+            // negates the browser's inverted convention), so touch and wheel
+            // scroll the same direction. Web fling/momentum is a scoped
+            // fast-follow — functional scroll here is intentional v1.
+            if let Some(prev) = prev_touch_pos {
+                this.dispatch_input(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    position,
+                    delta: ScrollDelta::Pixels(point(position.x - prev.x, position.y - prev.y)),
+                    modifiers,
+                    touch_phase: TouchPhase::Moved,
+                }));
+            }
         })
     }
 
@@ -295,6 +319,15 @@ impl WebWindowInner {
                 }
             }
         })
+    }
+
+    /// The last tracked element-local position of a touch pointer, if tracked.
+    fn touch_pos(&self, id: i32) -> Option<Point<Pixels>> {
+        self.active_touches
+            .borrow()
+            .iter()
+            .find(|(tid, _)| *tid == id)
+            .map(|(_, pos)| *pos)
     }
 
     /// Insert or update a tracked touch pointer's element-local position.

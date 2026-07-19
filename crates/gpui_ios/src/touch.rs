@@ -28,24 +28,30 @@
 //!
 //! # Gesture mapping (web-parity + iOS momentum)
 //!
-//! - **One finger** → `MouseDown` / `MouseMove{is_touch}` / `MouseUp`. The
-//!   consumer's recognizer classifies tap / pan / long-press / double-tap — the
-//!   same path the web backend drives.
+//! - **One finger** → `MouseDown` / `MouseMove{is_touch}` / `MouseUp` **AND** a
+//!   parallel `ScrollWheel{touch_phase: Moved}` on every drag step. A one-finger
+//!   drag now drives BOTH channels: the chart consumes the `MouseMove` to pan (it
+//!   ignores touch-phase `ScrollWheel`, so it never zooms on a finger drag), while
+//!   gpui scroll containers (bottom sheets, lists) consume the `ScrollWheel` to
+//!   scroll. This additive scroll channel is why sheets/lists scroll on touch; we
+//!   keep `MouseMove` because the consumer's recognizer classifies tap / pan /
+//!   long-press / double-tap off it — the same path the web backend drives. The
+//!   scroll delta is `pos - previous_pos` (natural direction, content tracks the
+//!   finger), mirroring the gpui-mobile oracle's `src/ios/window.rs`.
 //! - **Two fingers** → [`PlatformInput::Pinch`] (`Started`/`Moved`/`Ended`),
 //!   mirroring `gpui_web`'s 2-touch aggregation. The second finger's press is
 //!   suppressed (no `MouseDown`); the consumer cancels the first finger's
-//!   pending press on `Started`.
-//! - **Momentum** (iOS-only, not on web): a fast one-finger lift seeds a
+//!   pending press on `Started`. No `ScrollWheel` is emitted while pinching.
+//! - **Momentum** (iOS-only, not on web yet): a fast one-finger lift seeds a
 //!   [`MomentumScroller`]; [`TouchAggregator::pump_momentum`] then continues the
-//!   drag with decaying synthetic `MouseMove`s and a final `MouseUp`. We drive
-//!   the *drag* channel (not `ScrollWheel` like the gpui-mobile oracle) because
-//!   the consumer maps drag→pan but scroll→zoom.
+//!   fling on BOTH channels — decaying synthetic `MouseMove`s (chart pan) and
+//!   `ScrollWheel`s (scroll deceleration) — then a final `MouseUp`.
 
 // Rust guideline compliant 2026-02-21
 
 use gpui::{
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, PlatformInput,
-    Point, Size, TouchPhase, point, px,
+    Point, ScrollDelta, ScrollWheelEvent, Size, TouchPhase, point, px,
 };
 
 use crate::momentum::{MomentumScroller, MomentumStep, VelocityTracker};
@@ -130,7 +136,14 @@ impl TouchAggregator {
                     bounds,
                 );
                 self.momentum_pos = np;
-                vec![mouse_move(np)]
+                // Drive both channels during the glide: `MouseMove` continues the
+                // chart pan, `ScrollWheel` decelerates any gpui scroll container.
+                // The scroll delta is the per-frame displacement (same natural
+                // direction as the drag), matching the gpui-mobile oracle.
+                vec![
+                    scroll_wheel(np, point(px(dx), px(dy)), TouchPhase::Moved),
+                    mouse_move(np),
+                ]
             }
             None => {
                 self.momentum_open = false;
@@ -175,6 +188,13 @@ impl TouchAggregator {
 
     fn on_moved(&mut self, id: u64, pos: Point<Pixels>) -> Vec<PlatformInput> {
         let mut out = Vec::new();
+        // Capture THIS finger's prior tracked position before the upsert so a
+        // one-finger drag can also emit a `ScrollWheel` delta (`pos - prev`).
+        let prev = self
+            .active
+            .iter()
+            .find(|(tid, _)| *tid == id)
+            .map(|(_, p)| *p);
         self.touch_upsert(id, pos);
 
         if self.active.len() >= 2 {
@@ -188,10 +208,20 @@ impl TouchAggregator {
                 self.pinch_prev_dist = Some(dist);
             }
         } else {
-            // Lone finger. Track velocity only for a genuine drag (not the
-            // leftover finger after a pinch), then continue the pan.
+            // Lone finger. Only a genuine drag (not the leftover finger after a
+            // pinch) tracks velocity and drives the scroll channel.
             if !self.pinch_occurred {
                 self.velocity.record(f32::from(pos.x), f32::from(pos.y));
+                // Additive scroll channel: a one-finger drag also scrolls gpui
+                // scroll containers (sheets/lists). The chart ignores touch-phase
+                // `ScrollWheel` and pans off the `MouseMove` below instead.
+                if let Some(prev) = prev {
+                    out.push(scroll_wheel(
+                        pos,
+                        point(pos.x - prev.x, pos.y - prev.y),
+                        TouchPhase::Moved,
+                    ));
+                }
             }
             out.push(mouse_move(pos));
         }
@@ -287,6 +317,17 @@ fn mouse_up(pos: Point<Pixels>) -> PlatformInput {
     })
 }
 
+/// A pixel-precise `ScrollWheel` carrying a touch phase, so the chart panel can
+/// distinguish a finger scroll (`Moved`) from a real mouse wheel (`None`).
+fn scroll_wheel(position: Point<Pixels>, delta: Point<Pixels>, phase: TouchPhase) -> PlatformInput {
+    PlatformInput::ScrollWheel(ScrollWheelEvent {
+        position,
+        delta: ScrollDelta::Pixels(delta),
+        modifiers: Default::default(),
+        touch_phase: phase,
+    })
+}
+
 fn pinch(position: Point<Pixels>, delta: f32, phase: TouchPhase) -> PlatformInput {
     PlatformInput::Pinch(PinchEvent {
         position,
@@ -321,19 +362,93 @@ mod tests {
             if std::mem::discriminant(&e.phase) == std::mem::discriminant(&phase))
     }
 
+    /// The pixel scroll delta if `input` is a `ScrollWheel` in the given phase.
+    fn scroll_delta(input: &PlatformInput, phase: TouchPhase) -> Option<Point<Pixels>> {
+        match input {
+            PlatformInput::ScrollWheel(e)
+                if std::mem::discriminant(&e.touch_phase) == std::mem::discriminant(&phase) =>
+            {
+                match e.delta {
+                    ScrollDelta::Pixels(d) => Some(d),
+                    ScrollDelta::Lines(_) => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     #[test]
-    fn one_finger_down_move_up_is_mouse_sequence() {
+    fn one_finger_down_move_drives_both_scroll_and_move() {
         let mut agg = TouchAggregator::new();
 
         let down = agg.on_touch(1, PHASE_BEGAN, p(10.0, 10.0));
         assert!(matches!(down.as_slice(), [PlatformInput::MouseDown(_)]));
 
+        // A one-finger drag now yields a ScrollWheel (for scroll containers)
+        // ALONGSIDE the MouseMove (for the chart pan / recognizer).
         let mv = agg.on_touch(1, PHASE_MOVED, p(40.0, 12.0));
-        assert!(matches!(mv.as_slice(), [PlatformInput::MouseMove(e)] if e.is_touch));
+        assert!(matches!(
+            mv.as_slice(),
+            [PlatformInput::ScrollWheel(_), PlatformInput::MouseMove(m)] if m.is_touch
+        ));
+        // Delta = pos - previous_pos = (40,12) - (10,10) = (30, 2); natural sign.
+        let delta = scroll_delta(&mv[0], TouchPhase::Moved).expect("scroll wheel moved");
+        assert_eq!(f32::from(delta.x), 30.0);
+        assert_eq!(f32::from(delta.y), 2.0);
 
-        // Synchronous release → velocity ≈ 0 → no fling → immediate MouseUp.
+        // Clear the captured velocity so the lift is a deterministic no-fling
+        // release (the sub-microsecond spacing between the synthetic samples
+        // otherwise races the velocity window); the fling path has its own test.
+        agg.velocity.reset();
         let up = agg.on_touch(1, PHASE_ENDED, p(40.0, 12.0));
         assert!(matches!(up.as_slice(), [PlatformInput::MouseUp(_)]));
+        assert!(!agg.momentum_open);
+    }
+
+    #[test]
+    fn two_finger_move_emits_no_stray_scroll() {
+        let mut agg = TouchAggregator::new();
+        agg.on_touch(1, PHASE_BEGAN, p(100.0, 100.0));
+        agg.on_touch(2, PHASE_BEGAN, p(200.0, 100.0));
+
+        // Spreading fingers must be Pinch only — no ScrollWheel or MouseMove.
+        let moved = agg.on_touch(2, PHASE_MOVED, p(260.0, 100.0));
+        assert_eq!(moved.len(), 1);
+        assert!(is_pinch(&moved[0], TouchPhase::Moved));
+        assert!(scroll_delta(&moved[0], TouchPhase::Moved).is_none());
+    }
+
+    #[test]
+    fn fast_lift_pumps_decaying_scroll_then_mouse_up() {
+        use std::thread::sleep;
+        use std::time::Duration;
+
+        let mut agg = TouchAggregator::new();
+        // Seed a fast vertical fling directly on the scroller so the test does
+        // not depend on wall-clock velocity capture (that path is time-driven
+        // and covered by momentum.rs's own tests).
+        agg.momentum.fling(0.0, 3000.0);
+        agg.momentum_pos = p(100.0, 400.0);
+        agg.momentum_open = true;
+        let bounds = Size {
+            width: px(400.0),
+            height: px(800.0),
+        };
+
+        // A gliding frame drives BOTH channels: ScrollWheel then the drag move.
+        sleep(Duration::from_millis(8));
+        let step = agg.pump_momentum(bounds);
+        assert!(matches!(
+            step.as_slice(),
+            [PlatformInput::ScrollWheel(_), PlatformInput::MouseMove(m)] if m.is_touch
+        ));
+        assert!(scroll_delta(&step[0], TouchPhase::Moved).is_some());
+
+        // Once the fling settles, the deferred one-finger lift finalizes as a
+        // single MouseUp and the momentum channel closes.
+        agg.momentum.cancel();
+        let end = agg.pump_momentum(bounds);
+        assert!(matches!(end.as_slice(), [PlatformInput::MouseUp(_)]));
         assert!(!agg.momentum_open);
     }
 

@@ -35,11 +35,15 @@ mod dispatcher;
 mod display;
 #[cfg(target_os = "ios")]
 mod ffi;
-#[cfg(target_os = "ios")]
+// `momentum` + `touch` are portable pure-logic halves (finger-stream → cooked
+// `PlatformInput` aggregation + fling decay; only `gpui` + `std::time`, no
+// UIKit/Metal). Like `text_seam` they build under `test` so their headless
+// `#[test]`s run on the host; the heavy iOS backend still gates them on-device.
+#[cfg(any(target_os = "ios", test))]
 mod momentum;
 #[cfg(target_os = "ios")]
 mod platform;
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", test))]
 mod touch;
 #[cfg(target_os = "ios")]
 mod window;

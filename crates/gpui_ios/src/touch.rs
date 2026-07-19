@@ -317,14 +317,17 @@ fn mouse_up(pos: Point<Pixels>) -> PlatformInput {
     })
 }
 
-/// A pixel-precise `ScrollWheel` carrying a touch phase, so the chart panel can
-/// distinguish a finger scroll (`Moved`) from a real mouse wheel (`None`).
+/// A pixel-precise, touch-sourced `ScrollWheel` (`is_touch: true`), so a consumer
+/// that maps device scroll to zoom (the chart) can ignore finger-drag scrolls
+/// while scroll containers still consume them. `touch_phase` alone can't express
+/// this — a device wheel also reports `Moved`.
 fn scroll_wheel(position: Point<Pixels>, delta: Point<Pixels>, phase: TouchPhase) -> PlatformInput {
     PlatformInput::ScrollWheel(ScrollWheelEvent {
         position,
         delta: ScrollDelta::Pixels(delta),
         modifiers: Default::default(),
         touch_phase: phase,
+        is_touch: true,
     })
 }
 

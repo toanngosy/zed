@@ -283,6 +283,8 @@ pub(crate) unsafe fn platform_input_from_native(
                     delta,
                     touch_phase: phase,
                     modifiers: read_modifiers(native_event),
+                    // A device wheel / trackpad, never a synthetic touch drag.
+                    is_touch: false,
                 })
             }),
             NSEventType::NSLeftMouseDragged

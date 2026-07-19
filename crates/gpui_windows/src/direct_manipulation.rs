@@ -175,6 +175,7 @@ impl DirectManipulationEventHandler {
                         delta: ScrollDelta::Pixels(point(px(0.0), px(0.0))),
                         modifiers,
                         touch_phase: TouchPhase::Ended,
+                        is_touch: false,
                     }));
             }
             GestureKind::Pinch => {
@@ -329,6 +330,7 @@ impl IDirectManipulationViewportEventHandler_Impl for DirectManipulationEventHan
                         delta: ScrollDelta::Pixels(point(px(dx), px(dy))),
                         modifiers,
                         touch_phase,
+                        is_touch: false,
                     }));
             }
             GestureKind::Pinch => {

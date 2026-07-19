@@ -301,6 +301,7 @@ impl WebWindowInner {
                     delta: ScrollDelta::Pixels(point(position.x - prev.x, position.y - prev.y)),
                     modifiers,
                     touch_phase: TouchPhase::Moved,
+                    is_touch: true,
                 }));
             }
         })
@@ -415,6 +416,9 @@ impl WebWindowInner {
                 delta,
                 modifiers,
                 touch_phase: TouchPhase::Moved,
+                // A real browser `wheel` event (mouse wheel / trackpad), not a
+                // touch drag — so a scroll-to-zoom consumer treats it as a wheel.
+                is_touch: false,
             }));
         })
     }

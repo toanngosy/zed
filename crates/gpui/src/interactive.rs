@@ -443,6 +443,15 @@ pub struct ScrollWheelEvent {
 
     /// The phase of the touch event.
     pub touch_phase: TouchPhase,
+
+    /// Whether this scroll originated from a touch drag rather than a device
+    /// wheel / trackpad. Mirrors [`MouseMoveEvent::is_touch`]. A one-finger touch
+    /// drag emits a `ScrollWheel` alongside its `MouseMove` (mobile backends) so
+    /// scroll containers scroll on touch; a consumer that maps device scroll to
+    /// its own gesture (e.g. a chart's scroll-to-zoom) checks this to ignore
+    /// touch-sourced scrolls. `touch_phase` alone cannot express this — a device
+    /// wheel and a touch drag both report `Moved`.
+    pub is_touch: bool,
 }
 
 impl Sealed for ScrollWheelEvent {}

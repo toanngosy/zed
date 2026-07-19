@@ -3038,7 +3038,13 @@ impl Interactivity {
                         false
                     };
 
-                if is_group_hovered {
+                // Touch has no cursor, so a hover affordance is meaningless: a touch-sourced move
+                // (incl. iOS momentum) would otherwise glide the highlight row-to-row during a
+                // touch-drag scroll. Suppress only the STYLE here — `is_hovered` is left intact so
+                // event dispatch (e.g. the chart's touch pan via `on_mouse_move`) still fires. A
+                // real mouse move (`is_touch == false`) keeps hovering, so web mouse users are
+                // unaffected. Keyboard is already handled inside `is_hovered`.
+                if is_group_hovered && !window.last_input_was_touch() {
                     style.refine(&group_hover.style);
                 }
             }
@@ -3056,7 +3062,8 @@ impl Interactivity {
                     false
                 };
 
-                if is_hovered {
+                // See the group-hover note above: suppress hover STYLE on touch, not dispatch.
+                if is_hovered && !window.last_input_was_touch() {
                     style.refine(hover_style);
                 }
             }

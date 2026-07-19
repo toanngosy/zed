@@ -980,6 +980,7 @@ impl Frame {
 enum InputModality {
     Mouse,
     Keyboard,
+    Touch,
 }
 
 /// A single element captured during a layout dump.
@@ -2630,6 +2631,13 @@ impl Window {
     /// This is used for focus-visible styling to show focus indicators only for keyboard navigation.
     pub fn last_input_was_keyboard(&self) -> bool {
         self.last_input_modality == InputModality::Keyboard
+    }
+
+    /// Returns true if the last input event was a touch-sourced pointer move (finger, or iOS
+    /// momentum). Used to suppress hover *styling* (not event dispatch), since touch has no cursor
+    /// for which a hover affordance would be meaningful.
+    pub(crate) fn last_input_was_touch(&self) -> bool {
+        self.last_input_modality == InputModality::Touch
     }
 
     /// The current state of the keyboard's capslock
@@ -4610,6 +4618,11 @@ impl Window {
         let old_modality = self.last_input_modality;
         self.last_input_modality = match &event {
             PlatformInput::KeyDown(_) => InputModality::Keyboard,
+            // A touch-sourced move (finger / iOS momentum) has no cursor, so it must not paint a
+            // hover affordance; `is_hovered` is left untouched (it still gates event dispatch, which
+            // touch consumers like the chart's pan need) — only hover STYLE is skipped on touch, in
+            // `compute_style_internal`. `MouseDownEvent` has no `is_touch` field, so only `MouseMove`.
+            PlatformInput::MouseMove(e) if e.is_touch => InputModality::Touch,
             PlatformInput::MouseMove(_) | PlatformInput::MouseDown(_) => InputModality::Mouse,
             _ => self.last_input_modality,
         };

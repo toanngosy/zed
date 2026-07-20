@@ -1,0 +1,8 @@
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/thread_local-120ebb4cf1e133c3.d: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/cached.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/thread_id.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/unreachable.rs
+
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/libthread_local-120ebb4cf1e133c3.rmeta: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/cached.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/thread_id.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/unreachable.rs
+
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/lib.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/cached.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/thread_id.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thread_local-1.1.9/src/unreachable.rs:

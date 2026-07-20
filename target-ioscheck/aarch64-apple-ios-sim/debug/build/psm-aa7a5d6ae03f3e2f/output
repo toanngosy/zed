@@ -1,0 +1,57 @@
+cargo:rustc-check-cfg=cfg(switchable_stack,asm,link_asm)
+OPT_LEVEL = Some(0)
+OUT_DIR = Some(/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/build/psm-aa7a5d6ae03f3e2f/out)
+TARGET = Some(aarch64-apple-ios-sim)
+CARGO_ENCODED_RUSTFLAGS = Some(-Csymbol-mangling-version=v0--cfgtokio_unstable)
+HOST = Some(aarch64-apple-darwin)
+cargo:rerun-if-env-changed=CC_aarch64-apple-ios-sim
+CC_aarch64-apple-ios-sim = None
+cargo:rerun-if-env-changed=CC_aarch64_apple_ios_sim
+CC_aarch64_apple_ios_sim = None
+cargo:rerun-if-env-changed=TARGET_CC
+TARGET_CC = None
+cargo:rerun-if-env-changed=CC
+CC = None
+cargo:rerun-if-env-changed=CC_ENABLE_DEBUG_OUTPUT
+RUSTC_WRAPPER = None
+cargo:rerun-if-env-changed=CRATE_CC_NO_DEFAULTS
+CRATE_CC_NO_DEFAULTS = None
+DEBUG = Some(true)
+cargo:rerun-if-env-changed=IPHONEOS_DEPLOYMENT_TARGET
+IPHONEOS_DEPLOYMENT_TARGET = None
+Detecting "ios" SDK path for iphonesimulator
+cargo:rerun-if-env-changed=SDKROOT
+SDKROOT = None
+cargo:rerun-if-env-changed=CFLAGS
+CFLAGS = None
+cargo:rerun-if-env-changed=TARGET_CFLAGS
+TARGET_CFLAGS = None
+cargo:rerun-if-env-changed=CFLAGS_aarch64_apple_ios_sim
+CFLAGS_aarch64_apple_ios_sim = None
+cargo:rerun-if-env-changed=CFLAGS_aarch64-apple-ios-sim
+CFLAGS_aarch64-apple-ios-sim = None
+cargo:rustc-cfg=asm
+cargo:rustc-cfg=link_asm
+cargo:rustc-cfg=switchable_stack
+Detecting "ios" SDK path for iphonesimulator
+cargo:rerun-if-env-changed=AR_aarch64-apple-ios-sim
+AR_aarch64-apple-ios-sim = None
+cargo:rerun-if-env-changed=AR_aarch64_apple_ios_sim
+AR_aarch64_apple_ios_sim = None
+cargo:rerun-if-env-changed=TARGET_AR
+TARGET_AR = None
+cargo:rerun-if-env-changed=AR
+AR = None
+cargo:rerun-if-env-changed=CROSS_COMPILE
+CROSS_COMPILE = None
+RUSTC_LINKER = None
+cargo:rerun-if-env-changed=ARFLAGS
+ARFLAGS = None
+cargo:rerun-if-env-changed=TARGET_ARFLAGS
+TARGET_ARFLAGS = None
+cargo:rerun-if-env-changed=ARFLAGS_aarch64_apple_ios_sim
+ARFLAGS_aarch64_apple_ios_sim = None
+cargo:rerun-if-env-changed=ARFLAGS_aarch64-apple-ios-sim
+ARFLAGS_aarch64-apple-ios-sim = None
+cargo:rustc-link-lib=static=psm_s
+cargo:rustc-link-search=native=/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/build/psm-aa7a5d6ae03f3e2f/out

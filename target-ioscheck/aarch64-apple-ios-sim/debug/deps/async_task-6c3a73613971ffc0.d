@@ -1,0 +1,11 @@
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/async_task-6c3a73613971ffc0.d: /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/lib.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/header.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/raw.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/runnable.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/state.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/task.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/utils.rs
+
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/libasync_task-6c3a73613971ffc0.rmeta: /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/lib.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/header.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/raw.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/runnable.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/state.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/task.rs /Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/utils.rs
+
+/Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/lib.rs:
+/Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/header.rs:
+/Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/raw.rs:
+/Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/runnable.rs:
+/Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/state.rs:
+/Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/task.rs:
+/Users/toanngo/.cargo/git/checkouts/async-task-e468f817236eac43/b4486cd/src/utils.rs:

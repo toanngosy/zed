@@ -1,0 +1,8 @@
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/stacker-89f550bfeb5ae2fb.d: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/backends/mod.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/backends/fallback.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/mmap_stack_restore_guard.rs
+
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/libstacker-89f550bfeb5ae2fb.rmeta: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/backends/mod.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/backends/fallback.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/mmap_stack_restore_guard.rs
+
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/lib.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/backends/mod.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/backends/fallback.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/stacker-0.1.23/src/mmap_stack_restore_guard.rs:

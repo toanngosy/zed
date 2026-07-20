@@ -1,0 +1,9 @@
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/bzip2-572e5194565aea2f.d: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/mem.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/bufread.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/read.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/write.rs
+
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/libbzip2-572e5194565aea2f.rmeta: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/mem.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/bufread.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/read.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/write.rs
+
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/lib.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/mem.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/bufread.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/read.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bzip2-0.6.1/src/write.rs:

@@ -1290,6 +1290,14 @@ impl WgpuRenderer {
         loop {
             let mut instance_offset: u64 = 0;
             let mut overflow = false;
+            // Lux fork (issue #1512): per-frame uniform buffers created while
+            // compositing external chart textures. The web (BROWSER_WEBGPU)
+            // backend's `Drop for WebBuffer` is a no-op, so dropping the handle
+            // never calls `GPUBuffer.destroy()` and the GPU memory leaks until an
+            // OOM jetsam. We stash each one here and explicitly `destroy()` it
+            // once the frame's work is either submitted (spec-safe: WebGPU defers
+            // the free until submitted work completes) or abandoned on overflow.
+            let mut pending_external_uniforms: Vec<wgpu::Buffer> = Vec::new();
 
             let mut encoder =
                 self.resources()
@@ -1399,7 +1407,11 @@ impl WgpuRenderer {
                         PrimitiveBatch::ExternalTextures(range) => {
                             #[cfg(not(target_os = "macos"))]
                             {
-                                self.draw_external_textures(&scene.external_textures[range], &mut pass)
+                                self.draw_external_textures(
+                                    &scene.external_textures[range],
+                                    &mut pass,
+                                    &mut pending_external_uniforms,
+                                )
                             }
                             #[cfg(target_os = "macos")]
                             {
@@ -1417,6 +1429,12 @@ impl WgpuRenderer {
 
             if overflow {
                 drop(encoder);
+                // Lux fork (#1512): the pass was abandoned (nothing submitted),
+                // so the stashed per-frame external-texture uniforms are freed
+                // immediately before the retry re-creates them.
+                for uniform in pending_external_uniforms.drain(..) {
+                    uniform.destroy();
+                }
                 if self.instance_buffer_capacity >= self.max_buffer_size {
                     log::error!(
                         "instance buffer size grew too large: {}",
@@ -1432,6 +1450,13 @@ impl WgpuRenderer {
             self.resources()
                 .queue
                 .submit(std::iter::once(encoder.finish()));
+            // Lux fork (#1512): the composite is submitted; WebGPU defers the
+            // actual GPU free until submitted work completes, so destroying the
+            // per-frame external-texture uniforms now is spec-safe and reclaims
+            // the memory the no-op `Drop for WebBuffer` would otherwise leak.
+            for uniform in pending_external_uniforms.drain(..) {
+                uniform.destroy();
+            }
             frame.present();
             return true;
         }
@@ -1536,17 +1561,36 @@ impl WgpuRenderer {
     #[cfg(not(target_os = "macos"))]
     pub fn shared_gpu(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, wgpu::Adapter) {
         let r = self.resources();
-        (Arc::clone(&r.device), Arc::clone(&r.queue), r.adapter.clone())
+        (
+            Arc::clone(&r.device),
+            Arc::clone(&r.queue),
+            r.adapter.clone(),
+        )
     }
 
     /// Lux fork (additive): composite externally-owned RGBA `wgpu::Texture`s
     /// (embedded chart-engine frames) zero-copy. Reuses `vs_surface` + the
     /// surfaces bind-group layout with the non-YUV `fs_external_texture`.
+    ///
+    /// Per-frame GPU-lifecycle note (issue #1512): on the web (BROWSER_WEBGPU)
+    /// backend every wgpu resource has a no-op `Drop`, so nothing here is freed
+    /// by going out of scope. The uniform buffer is the only heap-holding
+    /// per-frame object with a `.destroy()` API, so it is stashed in
+    /// `pending_external_uniforms` and destroyed by the caller after
+    /// `queue.submit`. The texture is deliberately NOT destroyed here — it is a
+    /// clone of the caller's persistent render target (`chart_panel.rs`), and
+    /// `Texture::destroy()` frees the shared `GPUTexture` for every clone, which
+    /// would device-lost the target on the next frame. The per-frame
+    /// `TextureView` + `BindGroup` wrappers have no `.destroy()` in wgpu and leak
+    /// their tiny JS wrappers until GC; that residue is bytes-per-frame (vs the
+    /// MB/s the persistent target + buffer-destroy eliminate) and is accepted, so
+    /// it is intentionally not chased with a cache here (see issue #1512).
     #[cfg(not(target_os = "macos"))]
     fn draw_external_textures(
         &self,
         textures: &[PaintExternalTexture],
         pass: &mut wgpu::RenderPass<'_>,
+        pending_external_uniforms: &mut Vec<wgpu::Buffer>,
     ) -> bool {
         if textures.is_empty() {
             return true;
@@ -1603,6 +1647,12 @@ impl WgpuRenderer {
             pass.set_bind_group(0, &resources.globals_bind_group, &[]);
             pass.set_bind_group(1, &bind_group, &[]);
             pass.draw(0..4, 0..1);
+
+            // Hand the uniform to the caller to `destroy()` after submit — its
+            // GPU-side reference is already recorded into the pass, so moving the
+            // Rust handle out now is safe, and the no-op web `Drop` means this is
+            // the only way its memory is ever reclaimed (issue #1512).
+            pending_external_uniforms.push(uniform);
         }
         true
     }

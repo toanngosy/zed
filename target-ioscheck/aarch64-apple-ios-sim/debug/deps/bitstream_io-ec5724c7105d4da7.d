@@ -1,0 +1,8 @@
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/bitstream_io-ec5724c7105d4da7.d: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/huffman.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/read.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/write.rs
+
+/private/tmp/claude-501/-Users-toanngo--ao-data-worktrees-lux-lux-246/0eed6816-2683-5f95-a6de-03d0e5d0a6d3/scratchpad/zed-fork/target-ioscheck/aarch64-apple-ios-sim/debug/deps/libbitstream_io-ec5724c7105d4da7.rmeta: /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/lib.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/huffman.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/read.rs /Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/write.rs
+
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/lib.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/huffman.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/read.rs:
+/Users/toanngo/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/bitstream-io-4.9.0/src/write.rs:

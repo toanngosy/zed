@@ -1,0 +1,1 @@
+{"rustc":2179919275645516985,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[6353874942713733971,"build_script_build",false,12180560243199805329]],"local":[{"Precalculated":"357a0c56e0070480ad9daea5d2eaa83150b79e88"}],"rustflags":["-C","symbol-mangling-version=v0","--cfg","tokio_unstable"],"config":0,"compile_kind":0}

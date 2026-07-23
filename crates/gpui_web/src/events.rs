@@ -288,6 +288,16 @@ impl WebWindowInner {
                 modifiers,
                 click_count,
             }));
+
+            // Re-assert focus on the hidden capture `<input>` within the same
+            // user gesture. `pointerdown` focuses it, but on touch the soft
+            // keyboard resets when the finger LIFTS because `prevent_default()`
+            // plus the synthesized click leave focus off the input. Focusing
+            // again here (a pointerup gesture, so browsers honor it) keeps the
+            // keyboard up for a text field. Symmetric with `pointerdown`: when
+            // no text field owns the input it is `readonly`/`inputmode=none`,
+            // so this focus cannot pop the keyboard on a plain chart tap.
+            this.input_element.focus().ok();
         })
     }
 

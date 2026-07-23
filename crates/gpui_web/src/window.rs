@@ -65,6 +65,11 @@ pub(crate) struct WebWindowInner {
     pub(crate) last_physical_size: Cell<(u32, u32)>,
     pub(crate) notify_scale: Cell<bool>,
     pub(crate) is_composing: Cell<bool>,
+    /// Mirror of the hidden capture `<input>`'s current editability (the inverse
+    /// of its `readonly` attribute). Lets `set_input_editable` no-op when the DOM
+    /// already matches, so a steady-state redraw writes nothing — a `readonly`
+    /// write on the focused input resets the mobile-Chrome keyboard (issue #1677).
+    input_editable: Cell<bool>,
     mql_handle: RefCell<Option<MqlHandle>>,
     pending_physical_size: Cell<Option<(u32, u32)>>,
 }
@@ -148,8 +153,10 @@ impl WebWindow {
         // `take_input_handler` flip this as text fields gain/lose focus, so a
         // real text field (e.g. a ticker search) still brings up the keyboard.
         // `inputmode=none` alone is unreliable on iOS Safari, hence `readonly`
-        // is the primary lever (mdn/browser-compat-data#7186).
-        set_input_editable(&input_element, false);
+        // is the primary lever (mdn/browser-compat-data#7186). Editability is
+        // reconciled to text-field focus in `draw`; here we just seed the
+        // non-editable start state (matching `input_editable: Cell::new(false)`).
+        apply_input_editable(&input_element, false);
         input_element.focus().ok();
 
         let device_size = Size {
@@ -205,6 +212,7 @@ impl WebWindow {
             last_physical_size: Cell::new((0, 0)),
             notify_scale: Cell::new(false),
             is_composing: Cell::new(false),
+            input_editable: Cell::new(false),
             mql_handle: RefCell::new(None),
             pending_physical_size: Cell::new(None),
         });
@@ -441,6 +449,24 @@ impl WebWindowInner {
         Some(result)
     }
 
+    /// Idempotently toggle whether the hidden capture `<input>` can raise the
+    /// mobile keyboard, writing the DOM only on a real change.
+    ///
+    /// GPUI borrows the input handler out and back (`take`→`set`) on every
+    /// draw-time and event-time cycle. Driving `readonly`/`inputmode` off those
+    /// transient calls churned the attribute off→on every frame; on mobile
+    /// Chrome each `readonly` write on the focused input dismisses and reraises
+    /// the soft keyboard, which surfaced as the keyboard resetting when a finger
+    /// lifted (issue #1677). Guarding against the `input_editable` mirror keeps a
+    /// steady-state redraw free of DOM writes, so the keyboard stays put.
+    fn set_input_editable(&self, editable: bool) {
+        if self.input_editable.get() == editable {
+            return;
+        }
+        self.input_editable.set(editable);
+        apply_input_editable(&self.input_element, editable);
+    }
+
     pub(crate) fn register_appearance_change(
         self: &Rc<Self>,
     ) -> Option<Closure<dyn FnMut(JsValue)>> {
@@ -464,13 +490,16 @@ impl WebWindowInner {
     }
 }
 
-/// Toggle whether the hidden capture `<input>` can raise the mobile keyboard.
+/// Write the hidden capture `<input>`'s editability to the DOM unconditionally.
 ///
 /// When `editable` is `false` the input is `readonly` with `inputmode=none`, so
 /// focusing it (which GPUI does on every pointerdown) does not pop the soft
 /// keyboard — the desired state for chart interaction. When a text field is
 /// focused it is made editable with `inputmode=text` so typing and IME work.
-fn set_input_editable(input_element: &web_sys::HtmlInputElement, editable: bool) {
+///
+/// Prefer `WebWindowInner::set_input_editable`, which guards this behind the
+/// `input_editable` mirror so a no-op transition performs no DOM write.
+fn apply_input_editable(input_element: &web_sys::HtmlInputElement, editable: bool) {
     input_element.set_read_only(!editable);
     let inputmode = if editable { "text" } else { "none" };
     input_element.set_attribute("inputmode", inputmode).ok();
@@ -592,19 +621,19 @@ impl PlatformWindow for WebWindow {
 
     fn set_input_handler(&mut self, input_handler: PlatformInputHandler) {
         // A focused text field claims the hidden input — make it editable so the
-        // mobile soft keyboard appears and typing/IME works. GPUI borrows the
-        // handler out and back during each draw via `take`/`set`, so the steady
-        // state is what matters: a live handler ends on `set` (editable).
-        set_input_editable(&self.inner.input_element, true);
+        // mobile soft keyboard appears and typing/IME works. Idempotent, so the
+        // per-frame `take`→`set` cycle re-applies nothing once a field is active.
+        self.inner.set_input_editable(true);
         self.inner.state.borrow_mut().input_handler = Some(input_handler);
     }
 
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
-        // Revert to non-editable when no text field owns the input, so a chart
-        // tap can't pop the keyboard. During GPUI's draw-time borrow the handler
-        // is `set` back immediately after, restoring editability; only a genuine
-        // defocus leaves it non-editable.
-        set_input_editable(&self.inner.input_element, false);
+        // Do NOT flip editability here. GPUI's draw-time and event-time borrows
+        // `take` the handler transiently and `set` it right back, so toggling
+        // `readonly` off on every `take` churned the mobile keyboard (issue
+        // #1677). A genuine defocus is instead reconciled in `draw` from the
+        // steady-state handler presence, which writes nothing while a field
+        // stays focused.
         self.inner.state.borrow_mut().input_handler.take()
     }
 
@@ -725,6 +754,16 @@ impl PlatformWindow for WebWindow {
         }
 
         self.inner.state.borrow_mut().renderer.draw(scene);
+
+        // Reconcile the hidden input's editability to the steady-state handler
+        // presence. `draw` runs (via `present`) right after GPUI's draw-time
+        // `take`→`set`, so the handler slot now reflects reality: `Some` while a
+        // text field is focused (keep editable), `None` after a genuine defocus
+        // (revert to `readonly` so a chart tap can't pop the keyboard). Idempotent
+        // — a focused steady state writes nothing, avoiding the keyboard reset
+        // that a per-frame `readonly` toggle caused on mobile Chrome (issue #1677).
+        let editable = self.inner.state.borrow().input_handler.is_some();
+        self.inner.set_input_editable(editable);
     }
 
     fn completed_frame(&self) {

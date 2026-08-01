@@ -1605,14 +1605,12 @@ impl WgpuRenderer {
             let uniform = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("external_texture_params"),
                 size: std::mem::size_of::<SurfaceParams>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM,
-                mapped_at_creation: true,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
-            uniform
-                .slice(..)
-                .get_mapped_range_mut()
-                .copy_from_slice(bytemuck::bytes_of(&params));
-            uniform.unmap();
+            resources
+                .queue
+                .write_buffer(&uniform, 0, bytemuck::bytes_of(&params));
 
             let view = external
                 .texture

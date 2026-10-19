@@ -3423,7 +3423,7 @@ dependencies = [
 
 [[package]]
 name = "collections"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "gpui_util",
  "indexmap 2.14.2",
@@ -4960,7 +4960,7 @@ dependencies = [
 
 [[package]]
 name = "derive_refineable"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7525,7 +7525,7 @@ dependencies = [
 
 [[package]]
 name = "gpui_apple"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "anyhow",
  "async-task",
@@ -7582,7 +7582,7 @@ dependencies = [
 
 [[package]]
 name = "gpui_linux"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -7625,7 +7625,7 @@ dependencies = [
 
 [[package]]
 name = "gpui_macos"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -7694,7 +7694,7 @@ dependencies = [
 
 [[package]]
 name = "gpui_shared_string"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "schemars 1.2.3",
  "serde",
@@ -7713,7 +7713,7 @@ dependencies = [
 
 [[package]]
 name = "gpui_util"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "anyhow",
  "log",
@@ -7751,7 +7751,7 @@ dependencies = [
 
 [[package]]
 name = "gpui_wgpu"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -7779,7 +7779,7 @@ dependencies = [
 
 [[package]]
 name = "gpui_windows"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -8334,7 +8334,7 @@ checksum = "add0ab9360ddbd88cfeb3bd9574a1d85cfdfa14db10b3e21d3700dbc4328758f"
 
 [[package]]
 name = "http_client"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -15088,7 +15088,7 @@ dependencies = [
 
 [[package]]
 name = "refineable"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "derive_refineable",
 ]
@@ -15981,7 +15981,7 @@ dependencies = [
 
 [[package]]
 name = "scheduler"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "async-task",
  "backtrace",
@@ -23166,7 +23166,7 @@ dependencies = [
 
 [[package]]
 name = "ztracing"
-version = "0.1.0"
+version = "0.3.9"
 dependencies = [
  "async-channel 2.5.0",
  "js-sys",
@@ -23182,7 +23182,7 @@ dependencies = [
 
 [[package]]
 name = "ztracing_macro"
-version = "0.1.0"
+version = "0.3.9"
 
 [[package]]
 name = "zune-core"

@@ -1,5 +1,5 @@
 [package]
-name = "derive_refineable"
+name = "gpui-pre-derive-refineable"
 version = "0.3.9"
 edition.workspace = true
 publish = false
@@ -11,6 +11,7 @@ description = "A derive macro for creating refinement types in Rust"
 workspace = true
 
 [lib]
+name = "derive_refineable"
 path = "src/derive_refineable.rs"
 proc-macro = true
 doctest = false

@@ -1,11 +1,12 @@
 [package]
-name = "gpui_util"
+name = "gpui-pre-util"
 version = "0.3.9"
 publish.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
 
 [lib]
+name = "gpui_util"
 doctest = false
 
 [dependencies]

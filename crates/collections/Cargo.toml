@@ -1,5 +1,5 @@
 [package]
-name = "collections"
+name = "gpui-pre-collections"
 version = "0.3.9"
 edition.workspace = true
 publish = false
@@ -10,6 +10,7 @@ description = "Standard collection types used by Zed and GPUI"
 workspace = true
 
 [lib]
+name = "collections"
 path = "src/collections.rs"
 doctest = false
 

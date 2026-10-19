@@ -1,5 +1,5 @@
 [package]
-name = "scheduler"
+name = "gpui-pre-scheduler"
 version = "0.3.9"
 edition.workspace = true
 publish.workspace = true
@@ -9,6 +9,7 @@ license = "Apache-2.0"
 workspace = true
 
 [lib]
+name = "scheduler"
 path = "src/scheduler.rs"
 doctest = false
 

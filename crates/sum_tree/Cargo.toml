@@ -1,5 +1,5 @@
 [package]
-name = "sum_tree"
+name = "gpui-pre-sum-tree"
 version = "0.3.9"
 edition.workspace = true
 publish = false
@@ -10,6 +10,7 @@ description = "A sum tree data structure, a concurrency-friendly B-tree"
 workspace = true
 
 [lib]
+name = "sum_tree"
 path = "src/sum_tree.rs"
 doctest = false
 

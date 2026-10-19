@@ -314,7 +314,7 @@ cloud_llm_client = { path = "crates/cloud_llm_client" }
 codestral = { path = "crates/codestral" }
 collab = { path = "crates/collab" }
 collab_ui = { path = "crates/collab_ui" }
-collections = { path = "crates/collections", version = "0.3.9" }
+collections = { path = "crates/collections", version = "0.3.9" , package = "gpui-pre-collections" }
 command_palette = { path = "crates/command_palette" }
 command_palette_hooks = { path = "crates/command_palette_hooks" }
 compliance = { path = "tooling/compliance" }
@@ -333,7 +333,7 @@ debug_adapter_extension = { path = "crates/debug_adapter_extension" }
 debugger_tools = { path = "crates/debugger_tools" }
 debugger_ui = { path = "crates/debugger_ui" }
 deepseek = { path = "crates/deepseek" }
-derive_refineable = { path = "crates/refineable/derive_refineable" }
+derive_refineable = { path = "crates/refineable/derive_refineable" , package = "gpui-pre-derive-refineable" }
 dev_container = { path = "crates/dev_container" }
 diagnostics = { path = "crates/diagnostics" }
 edit_prediction = { path = "crates/edit_prediction" }
@@ -365,23 +365,23 @@ git_ui = { path = "crates/git_ui" }
 git_ui_core = { path = "crates/git_ui_core" }
 go_to_line = { path = "crates/go_to_line" }
 google_ai = { path = "crates/google_ai" }
-gpui = { path = "crates/gpui", default-features = false }
-gpui_apple = { path = "crates/gpui_apple" }
+gpui = { path = "crates/gpui", default-features = false , package = "gpui-pre" }
+gpui_apple = { path = "crates/gpui_apple" , package = "gpui-pre-apple" }
 gpui_ios = { path = "crates/gpui_ios" }
-gpui_linux = { path = "crates/gpui_linux", default-features = false }
-gpui_macos = { path = "crates/gpui_macos", default-features = false }
-gpui_macros = { path = "crates/gpui_macros" }
-gpui_platform = { path = "crates/gpui_platform", default-features = false }
-gpui_shared_string = { path = "crates/gpui_shared_string" }
+gpui_linux = { path = "crates/gpui_linux", default-features = false , package = "gpui-pre-linux" }
+gpui_macos = { path = "crates/gpui_macos", default-features = false , package = "gpui-pre-macos" }
+gpui_macros = { path = "crates/gpui_macros" , package = "gpui-pre-macros" }
+gpui_platform = { path = "crates/gpui_platform", default-features = false , package = "gpui-pre-platform" }
+gpui_shared_string = { path = "crates/gpui_shared_string" , package = "gpui-pre-shared-string" }
 gpui_tokio = { path = "crates/gpui_tokio" }
-gpui_util = { path = "crates/gpui_util" }
-gpui_web = { path = "crates/gpui_web", default-features = false }
-gpui_wgpu = { path = "crates/gpui_wgpu" }
-gpui_windows = { path = "crates/gpui_windows", default-features = false }
+gpui_util = { path = "crates/gpui_util" , package = "gpui-pre-util" }
+gpui_web = { path = "crates/gpui_web", default-features = false , package = "gpui-pre-web" }
+gpui_wgpu = { path = "crates/gpui_wgpu" , package = "gpui-pre-wgpu" }
+gpui_windows = { path = "crates/gpui_windows", default-features = false , package = "gpui-pre-windows" }
 grammars = { path = "crates/grammars" }
 hang_telemetry = { path = "crates/hang_telemetry" }
 html_to_markdown = { path = "crates/html_to_markdown" }
-http_client = { path = "crates/http_client" }
+http_client = { path = "crates/http_client" , package = "gpui-pre-http-client" }
 http_client_tls = { path = "crates/http_client_tls" }
 http_proxy = { path = "crates/http_proxy" }
 icons = { path = "crates/icons" }
@@ -447,18 +447,18 @@ prompt_store = { path = "crates/prompt_store" }
 proto = { path = "crates/proto" }
 proxy_handshake = { path = "crates/proxy_handshake" }
 recent_projects = { path = "crates/recent_projects" }
-refineable = { path = "crates/refineable" }
+refineable = { path = "crates/refineable" , package = "gpui-pre-refineable" }
 release_channel = { path = "crates/release_channel" }
 remote = { path = "crates/remote" }
 remote_connection = { path = "crates/remote_connection" }
 remote_server = { path = "crates/remote_server" }
 repl = { path = "crates/repl" }
-reqwest_client = { path = "crates/reqwest_client" }
+reqwest_client = { path = "crates/reqwest_client" , package = "gpui-pre-reqwest-client" }
 rodio = { git = "https://github.com/RustAudio/rodio", rev = "3ee9745862279ce1d18db593155016e7ce024aeb", default-features = false, features = ["wav", "playback", "wav_output", "recording"] }
 rope = { path = "crates/rope" }
 rpc = { path = "crates/rpc" }
 sandbox = { path = "crates/sandbox" }
-scheduler = { path = "crates/scheduler" }
+scheduler = { path = "crates/scheduler" , package = "gpui-pre-scheduler" }
 search = { path = "crates/search" }
 session = { path = "crates/session" }
 settings = { path = "crates/settings" }
@@ -475,7 +475,7 @@ snippets_ui = { path = "crates/snippets_ui" }
 sqlez = { path = "crates/sqlez" }
 sqlez_macros = { path = "crates/sqlez_macros" }
 streaming_diff = { path = "crates/streaming_diff" }
-sum_tree = { path = "crates/sum_tree" }
+sum_tree = { path = "crates/sum_tree" , package = "gpui-pre-sum-tree" }
 svg_preview = { path = "crates/svg_preview" }
 syntax_theme = { path = "crates/syntax_theme" }
 system_specs = { path = "crates/system_specs" }
@@ -518,8 +518,8 @@ zed_env_vars = { path = "crates/zed_env_vars" }
 zeta_prompt = { path = "crates/zeta_prompt" }
 zlog = { path = "crates/zlog" }
 zlog_settings = { path = "crates/zlog_settings" }
-ztracing = { path = "crates/ztracing" }
-ztracing_macro = { path = "crates/ztracing_macro" }
+ztracing = { path = "crates/ztracing" , package = "gpui-pre-ztracing" }
+ztracing_macro = { path = "crates/ztracing_macro" , package = "gpui-pre-ztracing-macro" }
 
 #
 # External crates

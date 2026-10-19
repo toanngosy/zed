@@ -1,5 +1,5 @@
 [package]
-name = "gpui_windows"
+name = "gpui-pre-windows"
 version = "0.3.9"
 edition.workspace = true
 publish.workspace = true
@@ -9,6 +9,7 @@ license = "Apache-2.0"
 workspace = true
 
 [lib]
+name = "gpui_windows"
 path = "src/gpui_windows.rs"
 doctest = false
 

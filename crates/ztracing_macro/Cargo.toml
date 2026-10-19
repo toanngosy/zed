@@ -1,11 +1,12 @@
 [package]
-name = "ztracing_macro"
+name = "gpui-pre-ztracing-macro"
 version = "0.3.9"
 edition.workspace = true
 publish.workspace = true
 license = "Apache-2.0"
 
 [lib]
+name = "ztracing_macro"
 proc-macro = true
 test = false
 doctest = false

@@ -1,5 +1,5 @@
 [package]
-name = "refineable"
+name = "gpui-pre-refineable"
 version = "0.3.9"
 edition.workspace = true
 publish = false
@@ -10,6 +10,7 @@ description = "A macro for creating 'refinement' types that can be used to parti
 workspace = true
 
 [lib]
+name = "refineable"
 path = "src/refineable.rs"
 doctest = false
 test = false

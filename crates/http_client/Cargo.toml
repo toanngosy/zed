@@ -1,5 +1,5 @@
 [package]
-name = "http_client"
+name = "gpui-pre-http-client"
 version = "0.3.9"
 edition.workspace = true
 publish = false
@@ -21,6 +21,7 @@ github-download = [
 ]
 
 [lib]
+name = "http_client"
 path = "src/http_client.rs"
 doctest = false
 

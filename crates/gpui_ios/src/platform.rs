@@ -19,10 +19,10 @@ use std::sync::Arc;
 use anyhow::Result;
 use futures::channel::oneshot;
 use gpui::{
-    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DummyKeyboardMapper,
-    ForegroundExecutor, Keymap, Menu, MenuItem, PathPromptOptions, Platform, PlatformDisplay,
-    PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Task,
-    ThermalState, WindowAppearance, WindowParams,
+    Action, ActivityGuard, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle,
+    DummyKeyboardMapper, ForegroundExecutor, Keymap, Menu, MenuItem, PathPromptOptions, Platform,
+    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
+    PlatformWindow, Task, ThermalState, WindowAppearance, WindowParams,
 };
 
 use crate::dispatcher::IosDispatcher;
@@ -130,7 +130,7 @@ impl Platform for IosPlatform {
 
     fn quit(&self) {}
 
-    fn restart(&self, _binary_path: Option<PathBuf>) {}
+    fn restart(&self, _binary_path: Option<PathBuf>, _arguments: Vec<std::ffi::OsString>) {}
 
     fn activate(&self, _ignoring_other_apps: bool) {}
 
@@ -223,9 +223,21 @@ impl Platform for IosPlatform {
 
     fn open_with_system(&self, _path: &Path) {}
 
-    fn on_quit(&self, _callback: Box<dyn FnMut()>) {}
+    fn on_quit(&self, _callback: Box<dyn FnMut() -> bool>) {}
 
     fn on_reopen(&self, _callback: Box<dyn FnMut()>) {}
+
+    fn on_displays_changed(&self, _callback: Box<dyn FnMut()>) {}
+
+    fn prevent_idle_sleep(&self, _reason: &str) -> Task<Result<ActivityGuard>> {
+        // UIKit idle-timer control lives with the host app's
+        // `UIApplication.isIdleTimerDisabled`; no FFI seam exists for it yet.
+        Task::ready(Ok(ActivityGuard::noop()))
+    }
+
+    fn on_system_sleep(&self, _callback: Box<dyn FnMut()>) {}
+
+    fn on_system_wake(&self, _callback: Box<dyn FnMut()>) {}
 
     fn set_menus(&self, _menus: Vec<Menu>, _keymap: &Keymap) {}
 

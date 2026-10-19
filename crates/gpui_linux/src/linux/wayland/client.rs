@@ -2428,6 +2428,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                         position,
                         pressed_button: None,
                         modifiers,
+                        is_touch: false,
                     }));
                 }
             }

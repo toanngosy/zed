@@ -2579,6 +2579,7 @@ mod tests {
             position: drag_end,
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::none(),
+            is_touch: false,
         });
         cx.simulate_event(MouseUpEvent {
             position: drag_end,

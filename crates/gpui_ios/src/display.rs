@@ -55,4 +55,10 @@ impl PlatformDisplay for IosDisplay {
             size: self.size,
         }
     }
+
+    fn refresh_interval(&self) -> Option<std::time::Duration> {
+        // iOS reports the screen's max FPS via UIScreen, but we don't plumb it
+        // through yet — `None` lets callers fall back to their default pacing.
+        None
+    }
 }

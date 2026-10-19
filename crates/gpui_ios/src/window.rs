@@ -23,10 +23,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use gpui::{
-    AnyWindowHandle, Bounds, Capslock, DevicePixels, DispatchEventResult, GpuSpecs, Modifiers,
-    Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow,
-    Point, PromptButton, PromptLevel, RequestFrameOptions, Scene, Size, WindowAppearance,
-    WindowBackgroundAppearance, WindowBounds, WindowControlArea, WindowParams, px,
+    AnyWindowHandle, Bounds, Capslock, DevicePixels, DispatchEventResult, FrameRequestSource,
+    GpuSpecs, Modifiers, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
+    PlatformInputHandler, PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions,
+    Scene, Size, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
+    WindowParams, WindowVisibility, px,
 };
 use gpui_wgpu::{GpuContext, WgpuRenderer, WgpuSurfaceConfig};
 use raw_window_handle::{
@@ -79,6 +80,9 @@ impl IosWindowState {
                 // The PoC drives a continuously-redrawing embedded chart, so
                 // force a redraw each tick rather than only on invalidation.
                 force_render: true,
+                // The host (CADisplayLink) is the native frame source.
+                signal_at: None,
+                signal_source: FrameRequestSource::NativeCallback,
             });
             self.callbacks.borrow_mut().request_frame = Some(cb);
         }
@@ -276,6 +280,16 @@ impl PlatformWindow for IosWindow {
         true
     }
 
+    fn visibility(&self) -> WindowVisibility {
+        // A hosted iOS surface is visible whenever it exists; UIKit tears the
+        // window down rather than hiding it.
+        WindowVisibility::Visible
+    }
+
+    fn on_visibility_change(&self, _callback: Box<dyn FnMut(WindowVisibility)>) {}
+
+    fn on_display_changed(&self, _callback: Box<dyn FnMut()>) {}
+
     fn window_bounds(&self) -> WindowBounds {
         WindowBounds::Fullscreen(self.state.bounds.get())
     }
@@ -415,7 +429,7 @@ impl PlatformWindow for IosWindow {
     }
 
     fn gpu_specs(&self) -> Option<GpuSpecs> {
-        Some(self.state.renderer.borrow().gpu_specs())
+        self.state.renderer.borrow().gpu_specs()
     }
 
     fn update_ime_position(&self, bounds: Bounds<Pixels>) {

@@ -3,8 +3,8 @@ use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
 use collections::FxHashMap;
 use gpui::{
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
-    ScaledPixels, Scene, Size, get_gamma_correction_ratios,
+    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, PaintExternalTexture, Path, Point,
+    PrimitiveBatch, ScaledPixels, Scene, Size, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -352,7 +352,6 @@ impl WgpuRenderer {
         )
     }
 
-    #[cfg(target_family = "wasm")]
     /// Lux fork (additive, iOS): build a renderer whose surface targets a
     /// `CAMetalLayer` directly (`SurfaceTargetUnsafe::CoreAnimationLayer`).
     ///
@@ -428,6 +427,7 @@ impl WgpuRenderer {
         (Arc::clone(&r.device), Arc::clone(&r.queue), r.adapter.clone())
     }
 
+    #[cfg(target_family = "wasm")]
     pub fn new_from_canvas(
         context: &WgpuContext,
         canvas: &web_sys::HtmlCanvasElement,
@@ -693,7 +693,6 @@ impl WgpuRendererCore {
             instances,
             texture,
             surfaces,
-            external_textures,
         }
     }
 
@@ -1006,7 +1005,7 @@ impl WgpuRendererCore {
             &layouts.surfaces,
             None,
             wgpu::PrimitiveTopology::TriangleStrip,
-            &[Some(color_target)],
+            &[Some(color_target.clone())],
             1,
             &shader_module,
         );
@@ -1022,7 +1021,7 @@ impl WgpuRendererCore {
             &layouts.surfaces,
             None,
             wgpu::PrimitiveTopology::TriangleStrip,
-            &[Some(color_target)],
+            &[Some(color_target.clone())],
             1,
             &shader_module,
         );

@@ -565,6 +565,7 @@ impl PrimitiveBatch {
                 )
             }
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
+            Self::ExternalTextures(range) => format!("external textures ({})", range.len()),
         }
     }
 }

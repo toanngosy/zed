@@ -1012,6 +1012,9 @@ fn scroll_event(
         delta: ScrollDelta::Pixels(delta),
         modifiers: Modifiers::default(),
         touch_phase,
+        // This event is emitted BY the touch-gesture recognizer — always
+        // touch-sourced (issue #1548/#1550).
+        is_touch: true,
     }
 }
 

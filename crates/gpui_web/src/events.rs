@@ -605,6 +605,7 @@ impl WebWindowInner {
                 position,
                 pressed_button: current_pressed,
                 modifiers,
+                is_touch: false,
             }));
         })
     }
@@ -668,6 +669,7 @@ impl WebWindowInner {
                 delta,
                 modifiers,
                 touch_phase: TouchPhase::Moved,
+                is_touch: false,
             }));
         })
     }

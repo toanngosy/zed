@@ -3452,7 +3452,6 @@ impl Window {
         self.last_input_modality == InputModality::Keyboard
     }
 
-
     /// Returns true if the last input event was a touch-sourced pointer move (finger, or iOS
     /// momentum). Used to suppress hover *styling* (not event dispatch), since touch has no cursor
     /// for which a hover affordance would be meaningful.

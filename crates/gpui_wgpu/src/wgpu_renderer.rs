@@ -5,10 +5,6 @@ use collections::FxHashMap;
 use gpui::{
     AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, Path, Point, PrimitiveBatch,
     ScaledPixels, Scene, Size, get_gamma_correction_ratios,
-
-    AtlasTextureId, Background, Bounds, DevicePixels, GpuSpecs, MonochromeSprite,
-    PaintExternalTexture, Path, Point, PolychromeSprite, PrimitiveBatch, Quad, ScaledPixels, Scene,
-    Shadow, Size, SubpixelSprite, Underline, get_gamma_correction_ratios,
 };
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
@@ -188,11 +184,9 @@ enum InstanceData {
 struct WgpuResources {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
-
     // Lux fork (additive): retained so an embedded engine can build its
     // GpuContext on this exact adapter+device (shared-device zero-copy).
     adapter: wgpu::Adapter,
-    surface: wgpu::Surface<'static>,
     pipelines: WgpuPipelines,
     bind_group_layouts: WgpuBindGroupLayouts,
     atlas_sampler: wgpu::Sampler,
@@ -358,6 +352,7 @@ impl WgpuRenderer {
         )
     }
 
+    #[cfg(target_family = "wasm")]
     /// Lux fork (additive, iOS): build a renderer whose surface targets a
     /// `CAMetalLayer` directly (`SurfaceTargetUnsafe::CoreAnimationLayer`).
     ///
@@ -425,7 +420,14 @@ impl WgpuRenderer {
         )
     }
 
-    #[cfg(target_family = "wasm")]
+    /// Lux fork (additive): expose this renderer's device/queue/adapter so an
+    /// embedded engine (chart-engine) can build its GpuContext on the same
+    /// device — required for shared-device zero-copy texture compositing.
+    pub fn shared_gpu(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, wgpu::Adapter) {
+        let r = &self.core().expect("renderer core dropped").resources;
+        (Arc::clone(&r.device), Arc::clone(&r.queue), r.adapter.clone())
+    }
+
     pub fn new_from_canvas(
         context: &WgpuContext,
         canvas: &web_sys::HtmlCanvasElement,
@@ -540,125 +542,6 @@ impl WgpuRenderer {
         surface.configure(&context.device, &surface_config);
 
         let core = WgpuRendererCore::new(context, atlas.clone(), surface_format, alpha_mode);
-
-        let queue = Arc::clone(&context.queue);
-        let dual_source_blending = context.supports_dual_source_blending();
-
-        let rendering_params = RenderingParameters::new(&context.adapter, surface_format);
-        let bind_group_layouts = Self::create_bind_group_layouts(&device);
-        let pipelines = Self::create_pipelines(
-            &device,
-            &bind_group_layouts,
-            surface_format,
-            alpha_mode,
-            rendering_params.path_sample_count,
-            dual_source_blending,
-        );
-
-        let atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("atlas_sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
-        let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as u64;
-        let globals_size = std::mem::size_of::<GlobalParams>() as u64;
-        let gamma_size = std::mem::size_of::<GammaParams>() as u64;
-        let path_globals_offset = globals_size.next_multiple_of(uniform_alignment);
-        let gamma_offset = (path_globals_offset + globals_size).next_multiple_of(uniform_alignment);
-
-        let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("globals_buffer"),
-            size: gamma_offset + gamma_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let max_buffer_size = device.limits().max_buffer_size;
-        let storage_buffer_alignment = device.limits().min_storage_buffer_offset_alignment as u64;
-        let initial_instance_buffer_capacity = 2 * 1024 * 1024;
-        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("instance_buffer"),
-            size: initial_instance_buffer_capacity,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals_bind_group"),
-            layout: &bind_group_layouts.globals,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &globals_buffer,
-                        offset: 0,
-                        size: Some(NonZeroU64::new(globals_size).unwrap()),
-                    }),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &globals_buffer,
-                        offset: gamma_offset,
-                        size: Some(NonZeroU64::new(gamma_size).unwrap()),
-                    }),
-                },
-            ],
-        });
-
-        let path_globals_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("path_globals_bind_group"),
-            layout: &bind_group_layouts.globals,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &globals_buffer,
-                        offset: path_globals_offset,
-                        size: Some(NonZeroU64::new(globals_size).unwrap()),
-                    }),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &globals_buffer,
-                        offset: gamma_offset,
-                        size: Some(NonZeroU64::new(gamma_size).unwrap()),
-                    }),
-                },
-            ],
-        });
-
-        let adapter_info = context.adapter.get_info();
-
-        let last_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let last_error_clone = Arc::clone(&last_error);
-        device.on_uncaptured_error(Arc::new(move |error| {
-            let mut guard = last_error_clone.lock().unwrap();
-            *guard = Some(error.to_string());
-        }));
-
-        let resources = WgpuResources {
-            device,
-            queue,
-            adapter: context.adapter.clone(),
-            surface,
-            pipelines,
-            bind_group_layouts,
-            atlas_sampler,
-            globals_buffer,
-            globals_bind_group,
-            path_globals_bind_group,
-            instance_buffer,
-            // Defer intermediate texture creation to first draw call via ensure_intermediate_textures().
-            // This avoids panics when the device/surface is in an invalid state during initialization.
-            path_intermediate_texture: None,
-            path_intermediate_view: None,
-            path_msaa_texture: None,
-            path_msaa_view: None,
-        };
 
         Ok(Self {
             context: gpu_context,
@@ -810,6 +693,7 @@ impl WgpuRendererCore {
             instances,
             texture,
             surfaces,
+            external_textures,
         }
     }
 
@@ -1122,7 +1006,7 @@ impl WgpuRendererCore {
             &layouts.surfaces,
             None,
             wgpu::PrimitiveTopology::TriangleStrip,
-            &[Some(color_target.clone())],
+            &[Some(color_target)],
             1,
             &shader_module,
         );
@@ -1136,6 +1020,7 @@ impl WgpuRendererCore {
             "fs_external_texture",
             &layouts.globals,
             &layouts.surfaces,
+            None,
             wgpu::PrimitiveTopology::TriangleStrip,
             &[Some(color_target)],
             1,
@@ -1554,6 +1439,7 @@ impl WgpuRendererCore {
             resources: WgpuResources {
                 device,
                 queue,
+                adapter: context.adapter.clone(),
                 pipelines,
                 bind_group_layouts,
                 atlas_sampler,
@@ -1688,6 +1574,92 @@ impl WgpuRendererCore {
             })
     }
 
+    /// Lux fork (additive): composite externally-owned RGBA `wgpu::Texture`s
+    /// (embedded chart-engine frames) zero-copy. Reuses `vs_surface` + the
+    /// surfaces bind-group layout with the non-YUV `fs_external_texture`.
+    ///
+    /// Per-frame GPU-lifecycle note (issue #1512): on the web (BROWSER_WEBGPU)
+    /// backend every wgpu resource has a no-op `Drop`, so nothing here is freed
+    /// by going out of scope. The uniform buffer is the only heap-holding
+    /// per-frame object with a `.destroy()` API, so it is stashed in
+    /// `pending_external_uniforms` and destroyed by the caller after
+    /// `queue.submit`. The texture is deliberately NOT destroyed here — it is a
+    /// clone of the caller's persistent render target (`chart_panel.rs`), and
+    /// `Texture::destroy()` frees the shared `GPUTexture` for every clone, which
+    /// would device-lost the target on the next frame. The per-frame
+    /// `TextureView` + `BindGroup` wrappers have no `.destroy()` in wgpu and leak
+    /// their tiny JS wrappers until GC; that residue is bytes-per-frame (vs the
+    /// MB/s the persistent target + buffer-destroy eliminate) and is accepted, so
+    /// it is intentionally not chased with a cache here (see issue #1512).
+    #[cfg(not(target_os = "macos"))]
+    fn draw_external_textures(
+        &self,
+        textures: &[PaintExternalTexture],
+        pass: &mut wgpu::RenderPass<'_>,
+        pending_external_uniforms: &mut Vec<wgpu::Buffer>,
+    ) {
+        if textures.is_empty() {
+            return;
+        }
+        let resources = self.resources();
+        let device = &resources.device;
+        for external in textures {
+            let params = SurfaceParams {
+                bounds: external.bounds.into(),
+                content_mask: external.content_mask.bounds.into(),
+            };
+            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("external_texture_params"),
+                size: std::mem::size_of::<SurfaceParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            resources
+                .queue
+                .write_buffer(&uniform, 0, bytemuck::bytes_of(&params));
+
+            let view = external
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("external_texture_bind_group"),
+                layout: &resources.bind_group_layouts.surfaces,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: uniform.as_entire_binding(),
+                    },
+                    // b1 (t_y) is the sampled texture; b2 (t_cb_cr) is bound to
+                    // the same view to satisfy the reused surfaces layout but is
+                    // ignored by fs_external_texture.
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Sampler(&resources.atlas_sampler),
+                    },
+                ],
+            });
+
+            pass.set_pipeline(&resources.pipelines.external_textures);
+            pass.set_bind_group(0, &resources.globals_bind_group, &[]);
+            pass.set_bind_group(1, &bind_group, &[]);
+            pass.draw(0..4, 0..1);
+
+            // Hand the uniform to the caller to `destroy()` after submit — its
+            // GPU-side reference is already recorded into the pass, so moving the
+            // Rust handle out now is safe, and the no-op web `Drop` means this is
+            // the only way its memory is ever reclaimed (issue #1512).
+            pending_external_uniforms.push(uniform);
+        }
+    }
+
     fn record_frame(
         &mut self,
         scene: &Scene,
@@ -1711,17 +1683,14 @@ impl WgpuRendererCore {
             })?;
         self.prepare_texture_bind_groups(scene);
 
-        loop {
-            let mut instance_offset: u64 = 0;
-            let mut overflow = false;
-            // Lux fork (issue #1512): per-frame uniform buffers created while
-            // compositing external chart textures. The web (BROWSER_WEBGPU)
-            // backend's `Drop for WebBuffer` is a no-op, so dropping the handle
-            // never calls `GPUBuffer.destroy()` and the GPU memory leaks until an
-            // OOM jetsam. We stash each one here and explicitly `destroy()` it
-            // once the frame's work is either submitted (spec-safe: WebGPU defers
-            // the free until submitted work completes) or abandoned on overflow.
-            let mut pending_external_uniforms: Vec<wgpu::Buffer> = Vec::new();
+        // Lux fork (issue #1512): per-frame uniform buffers created while
+        // compositing external chart textures. The web (BROWSER_WEBGPU)
+        // backend's `Drop for WebBuffer` is a no-op, so dropping the handle
+        // never calls `GPUBuffer.destroy()` and the GPU memory leaks until an
+        // OOM jetsam. We stash each one here and explicitly `destroy()` it
+        // once the frame's work is submitted (spec-safe: WebGPU defers the
+        // free until submitted work completes).
+        let mut pending_external_uniforms: Vec<wgpu::Buffer> = Vec::new();
 
         let mut encoder =
             self.resources()
@@ -1795,59 +1764,6 @@ impl WgpuRendererCore {
                                 &mut pass,
                             )?;
                         }
-
-                        PrimitiveBatch::Underlines(range) => self.draw_underlines(
-                            &scene.underlines[range],
-                            &mut instance_offset,
-                            &mut pass,
-                        ),
-                        PrimitiveBatch::MonochromeSprites { texture_id, range } => self
-                            .draw_monochrome_sprites(
-                                &scene.monochrome_sprites[range],
-                                texture_id,
-                                &mut instance_offset,
-                                &mut pass,
-                            ),
-                        PrimitiveBatch::SubpixelSprites { texture_id, range } => self
-                            .draw_subpixel_sprites(
-                                &scene.subpixel_sprites[range],
-                                texture_id,
-                                &mut instance_offset,
-                                &mut pass,
-                            ),
-                        PrimitiveBatch::PolychromeSprites { texture_id, range } => self
-                            .draw_polychrome_sprites(
-                                &scene.polychrome_sprites[range],
-                                texture_id,
-                                &mut instance_offset,
-                                &mut pass,
-                            ),
-                        PrimitiveBatch::Surfaces(_surfaces) => {
-                            // Surfaces are macOS-only for video playback
-                            // Not implemented for Linux/wgpu
-                            true
-                        }
-                        // Lux fork (additive): zero-copy external-texture
-                        // compositing (embedded chart-engine frame).
-                        PrimitiveBatch::ExternalTextures(range) => {
-                            #[cfg(not(target_os = "macos"))]
-                            {
-                                self.draw_external_textures(
-                                    &scene.external_textures[range],
-                                    &mut pass,
-                                    &mut pending_external_uniforms,
-                                )
-                            }
-                            #[cfg(target_os = "macos")]
-                            {
-                                let _ = range;
-                                true
-                            }
-                        }
-                    };
-                    if !ok {
-                        overflow = true;
-                        break;
                     }
                     PrimitiveBatch::Underlines(range) => self.draw_instances(
                         &instance_bindings.underlines,
@@ -1890,6 +1806,18 @@ impl WgpuRendererCore {
                     // Surfaces are macOS-only for video playback and are not
                     // implemented by the WGPU renderer.
                     PrimitiveBatch::Surfaces(_surfaces) => {}
+                    // Lux fork (additive): zero-copy external-texture
+                    // compositing (embedded chart-engine frames).
+                    PrimitiveBatch::ExternalTextures(range) => {
+                        #[cfg(not(target_os = "macos"))]
+                        self.draw_external_textures(
+                            &scene.external_textures[range],
+                            &mut pass,
+                            &mut pending_external_uniforms,
+                        );
+                        #[cfg(target_os = "macos")]
+                        let _ = range;
+                    }
                 }
             }
         }
@@ -1898,6 +1826,13 @@ impl WgpuRendererCore {
             .resources()
             .queue
             .submit(std::iter::once(encoder.finish()));
+        // Lux fork (#1512): the composite is submitted; WebGPU defers the
+        // actual GPU free until submitted work completes, so destroying the
+        // per-frame external-texture uniforms now is spec-safe and reclaims
+        // the memory the no-op `Drop for WebBuffer` would otherwise leak.
+        for uniform in pending_external_uniforms.drain(..) {
+            uniform.destroy();
+        }
         Ok(submission)
     }
 
@@ -2007,253 +1942,7 @@ impl WgpuRendererCore {
                     bind_group,
                 },
             );
-
-            if overflow {
-                drop(encoder);
-                // Lux fork (#1512): the pass was abandoned (nothing submitted),
-                // so the stashed per-frame external-texture uniforms are freed
-                // immediately before the retry re-creates them.
-                for uniform in pending_external_uniforms.drain(..) {
-                    uniform.destroy();
-                }
-                if self.instance_buffer_capacity >= self.max_buffer_size {
-                    log::error!(
-                        "instance buffer size grew too large: {}",
-                        self.instance_buffer_capacity
-                    );
-                    frame.present();
-                    return true;
-                }
-                self.grow_instance_buffer();
-                continue;
-            }
-
-            self.resources()
-                .queue
-                .submit(std::iter::once(encoder.finish()));
-            // Lux fork (#1512): the composite is submitted; WebGPU defers the
-            // actual GPU free until submitted work completes, so destroying the
-            // per-frame external-texture uniforms now is spec-safe and reclaims
-            // the memory the no-op `Drop for WebBuffer` would otherwise leak.
-            for uniform in pending_external_uniforms.drain(..) {
-                uniform.destroy();
-            }
-            frame.present();
-            return true;
         }
-    }
-
-
-    fn draw_quads(
-        &self,
-        quads: &[Quad],
-        instance_offset: &mut u64,
-        pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
-        let data = unsafe { Self::instance_bytes(quads) };
-        self.draw_instances(
-            data,
-            quads.len() as u32,
-            &self.resources().pipelines.quads,
-            instance_offset,
-            pass,
-        )
-    }
-
-    fn draw_shadows(
-        &self,
-        shadows: &[Shadow],
-        instance_offset: &mut u64,
-        pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
-        let data = unsafe { Self::instance_bytes(shadows) };
-        self.draw_instances(
-            data,
-            shadows.len() as u32,
-            &self.resources().pipelines.shadows,
-            instance_offset,
-            pass,
-        )
-    }
-
-    fn draw_underlines(
-        &self,
-        underlines: &[Underline],
-        instance_offset: &mut u64,
-        pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
-        let data = unsafe { Self::instance_bytes(underlines) };
-        self.draw_instances(
-            data,
-            underlines.len() as u32,
-            &self.resources().pipelines.underlines,
-            instance_offset,
-            pass,
-        )
-    }
-
-    fn draw_monochrome_sprites(
-        &self,
-        sprites: &[MonochromeSprite],
-        texture_id: AtlasTextureId,
-        instance_offset: &mut u64,
-        pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
-        let tex_info = self.atlas.get_texture_info(texture_id);
-        let data = unsafe { Self::instance_bytes(sprites) };
-        self.draw_instances_with_texture(
-            data,
-            sprites.len() as u32,
-            &tex_info.view,
-            &self.resources().pipelines.mono_sprites,
-            instance_offset,
-            pass,
-        )
-    }
-
-    fn draw_subpixel_sprites(
-        &self,
-        sprites: &[SubpixelSprite],
-        texture_id: AtlasTextureId,
-        instance_offset: &mut u64,
-        pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
-        let tex_info = self.atlas.get_texture_info(texture_id);
-        let data = unsafe { Self::instance_bytes(sprites) };
-        let resources = self.resources();
-        let pipeline = resources
-            .pipelines
-            .subpixel_sprites
-            .as_ref()
-            .unwrap_or(&resources.pipelines.mono_sprites);
-        self.draw_instances_with_texture(
-            data,
-            sprites.len() as u32,
-            &tex_info.view,
-            pipeline,
-            instance_offset,
-            pass,
-        )
-    }
-
-    /// Lux fork (additive): the shared wgpu device + queue, so an embedded
-    /// engine (chart-engine) can build its `GpuContext` on the SAME device
-    /// GPUI renders with — the WebGPU shared-device zero-copy path (WebGPU
-    /// forbids cross-`GPUDevice` texture use, so the device must be shared).
-    #[cfg(not(target_os = "macos"))]
-    pub fn shared_gpu(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>, wgpu::Adapter) {
-        let r = self.resources();
-        (
-            Arc::clone(&r.device),
-            Arc::clone(&r.queue),
-            r.adapter.clone(),
-        )
-    }
-
-    /// Lux fork (additive): composite externally-owned RGBA `wgpu::Texture`s
-    /// (embedded chart-engine frames) zero-copy. Reuses `vs_surface` + the
-    /// surfaces bind-group layout with the non-YUV `fs_external_texture`.
-    ///
-    /// Per-frame GPU-lifecycle note (issue #1512): on the web (BROWSER_WEBGPU)
-    /// backend every wgpu resource has a no-op `Drop`, so nothing here is freed
-    /// by going out of scope. The uniform buffer is the only heap-holding
-    /// per-frame object with a `.destroy()` API, so it is stashed in
-    /// `pending_external_uniforms` and destroyed by the caller after
-    /// `queue.submit`. The texture is deliberately NOT destroyed here — it is a
-    /// clone of the caller's persistent render target (`chart_panel.rs`), and
-    /// `Texture::destroy()` frees the shared `GPUTexture` for every clone, which
-    /// would device-lost the target on the next frame. The per-frame
-    /// `TextureView` + `BindGroup` wrappers have no `.destroy()` in wgpu and leak
-    /// their tiny JS wrappers until GC; that residue is bytes-per-frame (vs the
-    /// MB/s the persistent target + buffer-destroy eliminate) and is accepted, so
-    /// it is intentionally not chased with a cache here (see issue #1512).
-    #[cfg(not(target_os = "macos"))]
-    fn draw_external_textures(
-        &self,
-        textures: &[PaintExternalTexture],
-        pass: &mut wgpu::RenderPass<'_>,
-        pending_external_uniforms: &mut Vec<wgpu::Buffer>,
-    ) -> bool {
-        if textures.is_empty() {
-            return true;
-        }
-        let resources = self.resources();
-        let device = &resources.device;
-        for external in textures {
-            let params = SurfaceParams {
-                bounds: external.bounds.into(),
-                content_mask: external.content_mask.bounds.into(),
-            };
-            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("external_texture_params"),
-                size: std::mem::size_of::<SurfaceParams>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            resources
-                .queue
-                .write_buffer(&uniform, 0, bytemuck::bytes_of(&params));
-
-            let view = external
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("external_texture_bind_group"),
-                layout: &resources.bind_group_layouts.surfaces,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform.as_entire_binding(),
-                    },
-                    // b1 (t_y) is the sampled texture; b2 (t_cb_cr) is bound to
-                    // the same view to satisfy the reused surfaces layout but is
-                    // ignored by fs_external_texture.
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(&resources.atlas_sampler),
-                    },
-                ],
-            });
-
-            pass.set_pipeline(&resources.pipelines.external_textures);
-            pass.set_bind_group(0, &resources.globals_bind_group, &[]);
-            pass.set_bind_group(1, &bind_group, &[]);
-            pass.draw(0..4, 0..1);
-
-            // Hand the uniform to the caller to `destroy()` after submit — its
-            // GPU-side reference is already recorded into the pass, so moving the
-            // Rust handle out now is safe, and the no-op web `Drop` means this is
-            // the only way its memory is ever reclaimed (issue #1512).
-            pending_external_uniforms.push(uniform);
-        }
-        true
-    }
-
-    fn draw_polychrome_sprites(
-        &self,
-        sprites: &[PolychromeSprite],
-        texture_id: AtlasTextureId,
-        instance_offset: &mut u64,
-        pass: &mut wgpu::RenderPass<'_>,
-    ) -> bool {
-        let tex_info = self.atlas.get_texture_info(texture_id);
-        let data = unsafe { Self::instance_bytes(sprites) };
-        self.draw_instances_with_texture(
-            data,
-            sprites.len() as u32,
-            &tex_info.view,
-            &self.resources().pipelines.poly_sprites,
-            instance_offset,
-            pass,
-        )
     }
 
     fn draw_instances(

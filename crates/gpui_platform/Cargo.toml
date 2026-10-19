@@ -1,6 +1,6 @@
 [package]
 name = "gpui_platform"
-version = "0.1.0"
+version = "0.3.9"
 edition.workspace = true
 publish.workspace = true
 license = "Apache-2.0"
@@ -54,11 +54,11 @@ gpui = { workspace = true, features = ["windows-manifest"] }
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 gpui_linux.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-gpui_wgpu = { workspace = true, optional = true }
-
 [target.'cfg(target_os = "ios")'.dependencies]
 gpui_ios.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gpui_wgpu = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 gpui_web.workspace = true

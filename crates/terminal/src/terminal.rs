@@ -4035,23 +4035,6 @@ mod tests {
     }
 
     fn left_mouse_up_at(
-
-    fn ctrl_mouse_move_to(
-        terminal: &mut Terminal,
-        position: GpuiPoint<Pixels>,
-        cx: &mut Context<Terminal>,
-    ) {
-        let terminal_bounds = terminal.last_content.terminal_bounds.bounds;
-        let drag_event = MouseMoveEvent {
-            position,
-            pressed_button: Some(MouseButton::Left),
-            modifiers: Modifiers::secondary_key(),
-            is_touch: false,
-        };
-        terminal.mouse_drag(&drag_event, terminal_bounds, cx);
-    }
-
-    fn ctrl_mouse_up_at(
         terminal: &mut Terminal,
         position: GpuiPoint<Pixels>,
         cx: &mut Context<Terminal>,
@@ -4075,6 +4058,7 @@ mod tests {
             position,
             pressed_button: Some(MouseButton::Left),
             modifiers: Modifiers::none(),
+            is_touch: false,
         };
         terminal.mouse_drag(&drag_event, region, MouseInputMode::ReportToTerminal, cx);
     }
@@ -4260,7 +4244,8 @@ mod tests {
                     position: point(px(90.0), px(10.0)),
                     pressed_button: Some(MouseButton::Left),
                     modifiers: shift,
-                },
+                    is_touch: false,
+        },
                 region,
                 MouseInputMode::ReportToTerminal,
                 cx,
@@ -5297,7 +5282,8 @@ mod tests {
                 position,
                 pressed_button: Some(MouseButton::Left),
                 modifiers: Modifiers::secondary_key(),
-            };
+                is_touch: false,
+        };
             terminal.mouse_drag(
                 &drag_event,
                 terminal_bounds,
@@ -5418,7 +5404,8 @@ mod tests {
                     position: up_position,
                     pressed_button: Some(MouseButton::Left),
                     modifiers: Modifiers::secondary_key(),
-                },
+                    is_touch: false,
+        },
                 MouseInputMode::ReportToTerminal,
                 cx,
             );
@@ -5702,7 +5689,8 @@ mod tests {
                     position,
                     modifiers,
                     ..default()
-                };
+                    is_touch: false,
+        };
                 self.window.simulate_mouse_move(position, self.cx);
                 self.unthrottle();
                 self.terminal
@@ -6253,7 +6241,8 @@ mod tests {
                         &MouseMoveEvent {
                             position,
                             ..default()
-                        },
+                            is_touch: false,
+        },
                         MouseInputMode::ReportToTerminal,
                         cx,
                     );

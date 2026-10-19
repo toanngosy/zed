@@ -5081,6 +5081,7 @@ mod tests {
                         position: point(px(10.), px(10.)),
                         modifiers: Default::default(),
                         pressed_button: None,
+                        is_touch: false,
                     }
                     .to_platform_input(),
                     cx,
@@ -5118,29 +5119,6 @@ mod tests {
         test_app
             .update_window(any_window, |_, window, cx| {
                 window.draw(cx).clear(cx);
-
-                window.draw(cx).clear();
-            })
-            .unwrap();
-
-        test_app
-            .update_window(any_window, |_, window, cx| {
-                window.dispatch_event(
-                    MouseMoveEvent {
-                        position: point(px(10.), px(10.)),
-                        modifiers: Default::default(),
-                        pressed_button: None,
-                        is_touch: false,
-                    }
-                    .to_platform_input(),
-                    cx,
-                );
-            })
-            .unwrap();
-
-        test_app
-            .update_window(any_window, |_, window, cx| {
-                window.draw(cx).clear();
             })
             .unwrap();
 

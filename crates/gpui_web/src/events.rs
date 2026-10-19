@@ -6,11 +6,6 @@ use gpui::{
     MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
     Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchEvent, TouchId, TouchPhase,
     point, px,
-
-    Capslock, DispatchEventResult, ExternalPaths, FileDropEvent, KeyDownEvent, KeyUpEvent,
-    Keystroke, Modifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseExitEvent,
-    MouseMoveEvent, MouseUpEvent, NavigationDirection, PinchEvent, Pixels, PlatformInput, Point,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
 };
 use wasm_bindgen::prelude::*;
 
@@ -148,62 +143,6 @@ impl ClickState {
     }
 }
 
-/// Minimum drag displacement (logical px) along the dominant axis before a
-/// one-finger scroll commits to that axis. Mirrors the `gpui_ios` backend's
-/// constant so touch and web agree on when a swipe locks.
-const AXIS_LOCK_THRESHOLD_PX: f32 = 8.0;
-
-/// The axis a one-finger scroll has committed to for the rest of a drag.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LockedAxis {
-    Horizontal,
-    Vertical,
-}
-
-/// Per-gesture dominant-axis lock for the additive one-finger scroll channel.
-///
-/// A one-finger drag emits a `ScrollWheel` on top of its `MouseMove`. Without a
-/// lock, a diagonal drag over a horizontally-scrolling carousel nested in a
-/// vertically-scrolling sheet scrolls BOTH at once and jitters (issue #1567).
-/// Accumulate the drag displacement and, once it clears
-/// [`AXIS_LOCK_THRESHOLD_PX`], lock to the larger-magnitude axis and zero the
-/// minor component of every later scroll delta. The `MouseMove` channel (chart
-/// pan) stays full 2D. This is the behavioral mirror of the `gpui_ios`
-/// `AxisLock` — kept as a separate copy because the two backends share no crate;
-/// web has no fling/momentum, so there is no locked axis to carry past lift.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct AxisLock {
-    /// Signed drag displacement since the gesture began (logical px).
-    accum_x: f32,
-    accum_y: f32,
-    /// The committed axis, or `None` until the threshold is cleared.
-    locked: Option<LockedAxis>,
-}
-
-impl AxisLock {
-    /// Feed one raw per-step scroll delta; returns the delta to actually emit,
-    /// with the minor axis zeroed once the drag has locked.
-    fn apply(&mut self, dx: f32, dy: f32) -> (f32, f32) {
-        self.accum_x += dx;
-        self.accum_y += dy;
-        if self.locked.is_none() {
-            let (ax, ay) = (self.accum_x.abs(), self.accum_y.abs());
-            if ax.max(ay) >= AXIS_LOCK_THRESHOLD_PX {
-                self.locked = Some(if ax >= ay {
-                    LockedAxis::Horizontal
-                } else {
-                    LockedAxis::Vertical
-                });
-            }
-        }
-        match self.locked {
-            Some(LockedAxis::Horizontal) => (dx, 0.0),
-            Some(LockedAxis::Vertical) => (0.0, dy),
-            None => (dx, dy),
-        }
-    }
-}
-
 impl WebWindowInner {
     pub fn register_event_listeners(self: &Rc<Self>) -> WebEventListeners {
         let mut handles = vec![
@@ -212,7 +151,6 @@ impl WebWindowInner {
             self.register_pointer_cancel(),
             self.register_touch_end(),
             self.register_pointer_move(),
-            self.register_pointer_cancel(),
             self.register_pointer_leave(),
             self.register_wheel(),
             self.register_context_menu(),
@@ -346,33 +284,7 @@ impl WebWindowInner {
             }
 
             let button = dom_mouse_button_to_gpui(event.button());
-
-            let position = pointer_position_in_element(&event);
             let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
-
-            // Multi-touch pinch: track each touch pointer. A second finger
-            // starts a pinch gesture rather than a second press — suppress the
-            // `MouseDown` so the finger cannot also begin a pan.
-            if is_touch_pointer(&event) {
-                // Fresh gesture (or a second finger starting a pinch): clear any
-                // dominant-axis lock so this drag picks its own axis.
-                this.touch_axis_lock.set(AxisLock::default());
-                this.touch_upsert(event.pointer_id(), position);
-                if let Some((center, dist)) = this.pinch_geometry() {
-                    this.pinch_prev_dist.set(Some(dist));
-                    this.dispatch_input(PlatformInput::Pinch(PinchEvent {
-                        position: center,
-                        // Started carries no zoom; the consumer uses it to close
-                        // out the first finger's pending press before zooming.
-                        delta: 0.0,
-                        modifiers,
-                        phase: TouchPhase::Started,
-                    }));
-                    return;
-                }
-            }
-
-            let button = dom_mouse_button_to_gpui(event.button());
             let time = js_sys::Date::now();
 
             this.pressed_button.set(Some(button));
@@ -459,30 +371,6 @@ impl WebWindowInner {
 
             let button = dom_mouse_button_to_gpui(event.button());
             let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
-
-            // Lifting a finger out of a pinch ends the pinch. Do NOT turn it
-            // into a `MouseUp`: the pressed finger was suppressed at `Down`, so
-            // an up here would read downstream as a spurious tap.
-            if is_touch_pointer(&event) {
-                // A lifted finger ends the drag — clear the axis lock either way.
-                this.touch_axis_lock.set(AxisLock::default());
-                let was_pinching = this.active_touches.borrow().len() >= 2;
-                this.touch_remove(event.pointer_id());
-                if was_pinching {
-                    if this.active_touches.borrow().len() < 2 {
-                        this.pinch_prev_dist.set(None);
-                        this.dispatch_input(PlatformInput::Pinch(PinchEvent {
-                            position,
-                            delta: 0.0,
-                            modifiers,
-                            phase: TouchPhase::Ended,
-                        }));
-                    }
-                    return;
-                }
-            }
-
-            let button = dom_mouse_button_to_gpui(event.button());
 
             this.pressed_button.set(None);
             let click_count = this.click_state.borrow().current_count;
@@ -705,39 +593,6 @@ impl WebWindowInner {
             }
 
             let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
-
-            // Keep tracked touch positions current so pinch geometry is
-            // accurate the instant a second finger joins an in-progress drag.
-            // Capture this pointer's PRIOR position before the upsert so a
-            // single-finger drag can emit a `ScrollWheel` delta (`pos - prev`).
-            let prev_touch_pos = if is_touch_pointer(&event) {
-                let prev = this.touch_pos(event.pointer_id());
-                this.touch_upsert(event.pointer_id(), position);
-                prev
-            } else {
-                None
-            };
-
-            // Two fingers down → emit an incremental pinch (magnification delta
-            // relative to the previous separation) and suppress the pan so the
-            // gesture zooms instead of dragging the view.
-            if is_touch_pointer(&event) && this.active_touches.borrow().len() >= 2 {
-                if let Some((center, dist)) = this.pinch_geometry() {
-                    if let Some(prev) = this.pinch_prev_dist.get() {
-                        if prev > f32::EPSILON {
-                            this.dispatch_input(PlatformInput::Pinch(PinchEvent {
-                                position: center,
-                                delta: dist / prev - 1.0,
-                                modifiers,
-                                phase: TouchPhase::Moved,
-                            }));
-                        }
-                    }
-                    this.pinch_prev_dist.set(Some(dist));
-                }
-                return;
-            }
-
             let current_pressed = this.pressed_button.get();
 
             {
@@ -750,98 +605,11 @@ impl WebWindowInner {
                 position,
                 pressed_button: current_pressed,
                 modifiers,
-                is_touch: is_touch_pointer(&event),
             }));
-
-            // Additive scroll channel: a single-finger drag also feeds gpui
-            // scroll containers (bottom sheets, lists) a `ScrollWheel` so they
-            // scroll on touch. The chart pans off the `MouseMove` above and
-            // ignores touch-phase `ScrollWheel`. `prev_touch_pos` is `Some` only
-            // for a single-finger touch (two-finger returns early as a pinch).
-            // Delta = `pos - prev`, the same sign `register_wheel` produces (it
-            // negates the browser's inverted convention), so touch and wheel
-            // scroll the same direction. Web fling/momentum is a scoped
-            // fast-follow — functional scroll here is intentional v1. The delta is
-            // dominant-axis-locked so a diagonal drag doesn't scroll a nested
-            // carousel and its parent sheet at once (issue #1567).
-            if let Some(prev) = prev_touch_pos {
-                let mut lock = this.touch_axis_lock.get();
-                let (sdx, sdy) = lock.apply(
-                    f32::from(position.x - prev.x),
-                    f32::from(position.y - prev.y),
-                );
-                this.touch_axis_lock.set(lock);
-                this.dispatch_input(PlatformInput::ScrollWheel(ScrollWheelEvent {
-                    position,
-                    delta: ScrollDelta::Pixels(point(px(sdx), px(sdy))),
-                    modifiers,
-                    touch_phase: TouchPhase::Moved,
-                    is_touch: true,
-                }));
-            }
         })
     }
 
     fn register_pointer_leave(self: &Rc<Self>) -> EventListenerHandle {
-
-    /// Drop a cancelled touch (system gesture interruption, e.g. the browser
-    /// claims the gesture) so a stale pointer cannot wedge pinch mode on.
-    fn register_pointer_cancel(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
-        let this = Rc::clone(self);
-        self.listen("pointercancel", move |event: JsValue| {
-            let event: web_sys::PointerEvent = event.unchecked_into();
-            if is_touch_pointer(&event) {
-                this.touch_axis_lock.set(AxisLock::default());
-                this.touch_remove(event.pointer_id());
-                if this.active_touches.borrow().len() < 2 {
-                    this.pinch_prev_dist.set(None);
-                }
-            }
-        })
-    }
-
-    /// The last tracked element-local position of a touch pointer, if tracked.
-    fn touch_pos(&self, id: i32) -> Option<Point<Pixels>> {
-        self.active_touches
-            .borrow()
-            .iter()
-            .find(|(tid, _)| *tid == id)
-            .map(|(_, pos)| *pos)
-    }
-
-    /// Insert or update a tracked touch pointer's element-local position.
-    fn touch_upsert(&self, id: i32, pos: Point<Pixels>) {
-        let mut touches = self.active_touches.borrow_mut();
-        if let Some(entry) = touches.iter_mut().find(|(tid, _)| *tid == id) {
-            entry.1 = pos;
-        } else {
-            touches.push((id, pos));
-        }
-    }
-
-    /// Remove a tracked touch pointer by its `pointerId`.
-    fn touch_remove(&self, id: i32) {
-        self.active_touches.borrow_mut().retain(|(tid, _)| *tid != id);
-    }
-
-    /// Pinch centroid and finger separation from the first two active touches.
-    ///
-    /// Returns `None` unless at least two touches are down.
-    fn pinch_geometry(&self) -> Option<(Point<Pixels>, f32)> {
-        let touches = self.active_touches.borrow();
-        if touches.len() < 2 {
-            return None;
-        }
-        let a = touches[0].1;
-        let b = touches[1].1;
-        let (ax, ay) = (f32::from(a.x), f32::from(a.y));
-        let (bx, by) = (f32::from(b.x), f32::from(b.y));
-        let center = point(px((ax + bx) / 2.0), px((ay + by) / 2.0));
-        let (dx, dy) = (bx - ax, by - ay);
-        Some((center, (dx * dx + dy * dy).sqrt()))
-    }
-
-    fn register_pointer_leave(self: &Rc<Self>) -> Closure<dyn FnMut(JsValue)> {
         let this = Rc::clone(self);
         self.listen("pointerleave", move |event: JsValue| {
             let event: web_sys::PointerEvent = event.unchecked_into();
@@ -900,9 +668,6 @@ impl WebWindowInner {
                 delta,
                 modifiers,
                 touch_phase: TouchPhase::Moved,
-                // A real browser `wheel` event (mouse wheel / trackpad), not a
-                // touch drag — so a scroll-to-zoom consumer treats it as a wheel.
-                is_touch: false,
             }));
         })
     }
@@ -1484,10 +1249,6 @@ fn dom_key_to_gpui_key(event: &web_sys::KeyboardEvent) -> String {
             other.to_lowercase()
         }
     }
-}
-
-fn is_touch_pointer(event: &web_sys::PointerEvent) -> bool {
-    event.pointer_type() == "touch"
 }
 
 fn dom_mouse_button_to_gpui(button: i16) -> MouseButton {

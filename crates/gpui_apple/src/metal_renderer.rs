@@ -807,9 +807,9 @@ impl MetalRenderer {
                     command_encoder,
                 ),
                 PrimitiveBatch::ExternalTextures(range) => self.draw_external_textures(
-                    &scene.external_textures[range],
-                    instance_buffer,
-                    &mut instance_offset,
+                    &scene.external_textures[range.clone()],
+                    range.start,
+                    instance_bindings,
                     viewport_size,
                     command_encoder,
                 ),
@@ -1303,13 +1303,13 @@ impl MetalRenderer {
     fn draw_external_textures(
         &mut self,
         textures: &[PaintExternalTexture],
-        instance_buffer: &mut InstanceBuffer,
-        instance_offset: &mut usize,
+        first_texture: usize,
+        instance_bindings: &InstanceBindings,
         viewport_size: Size<DevicePixels>,
         command_encoder: &metal::RenderCommandEncoderRef,
-    ) -> bool {
+    ) {
         if textures.is_empty() {
-            return true;
+            return;
         }
         command_encoder.set_render_pipeline_state(&self.external_textures_pipeline_state);
         command_encoder.set_vertex_buffer(
@@ -1317,28 +1317,21 @@ impl MetalRenderer {
             Some(&self.unit_vertices),
             0,
         );
+        command_encoder.set_vertex_buffer(
+            SurfaceInputIndex::Surfaces as u64,
+            Some(&instance_bindings.external_textures.buffer),
+            instance_bindings.external_textures.offset as u64,
+        );
         command_encoder.set_vertex_bytes(
             SurfaceInputIndex::ViewportSize as u64,
             mem::size_of_val(&viewport_size) as u64,
             &viewport_size as *const Size<DevicePixels> as *const _,
         );
 
-        for external in textures {
+        for (index, external) in textures.iter().enumerate() {
             let texture_size = size(
                 DevicePixels(external.texture.width() as i32),
                 DevicePixels(external.texture.height() as i32),
-            );
-
-            align_offset(instance_offset);
-            let next_offset = *instance_offset + mem::size_of::<SurfaceBounds>();
-            if next_offset > instance_buffer.size {
-                return false;
-            }
-
-            command_encoder.set_vertex_buffer(
-                SurfaceInputIndex::Surfaces as u64,
-                Some(&instance_buffer.metal_buffer),
-                *instance_offset as u64,
             );
             command_encoder.set_vertex_bytes(
                 SurfaceInputIndex::TextureSize as u64,
@@ -1348,22 +1341,14 @@ impl MetalRenderer {
             command_encoder
                 .set_fragment_texture(SurfaceInputIndex::YTexture as u64, Some(&external.texture));
 
-            unsafe {
-                let buffer_contents = (instance_buffer.metal_buffer.contents() as *mut u8)
-                    .add(*instance_offset) as *mut SurfaceBounds;
-                ptr::write(
-                    buffer_contents,
-                    SurfaceBounds {
-                        bounds: external.bounds,
-                        content_mask: external.content_mask,
-                    },
-                );
-            }
-
-            command_encoder.draw_primitives(metal::MTLPrimitiveType::Triangle, 0, 6);
-            *instance_offset = next_offset;
+            command_encoder.draw_primitives_instanced_base_instance(
+                metal::MTLPrimitiveType::Triangle,
+                0,
+                6,
+                1,
+                (first_texture + index) as u64,
+            );
         }
-        true
     }
 
     /// Lux fork (additive): the renderer's Metal device, exposed so an embedded
@@ -1558,6 +1543,7 @@ struct InstanceBindings {
     monochrome_sprites: InstanceBinding,
     polychrome_sprites: InstanceBinding,
     surfaces: InstanceBinding,
+    external_textures: InstanceBinding,
 }
 
 fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<InstanceBindings> {
@@ -1571,6 +1557,12 @@ fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<I
             bounds: surface.bounds,
             content_mask: surface.content_mask,
         }))?,
+        external_textures: writer.write_iter(
+            scene.external_textures.iter().map(|t| SurfaceBounds {
+                bounds: t.bounds,
+                content_mask: t.content_mask,
+            }),
+        )?,
     })
 }
 

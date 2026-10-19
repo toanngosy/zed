@@ -1,6 +1,6 @@
 [package]
 name = "gpui"
-version = "0.2.2"
+version = "0.3.9"
 edition.workspace = true
 authors = ["Nathan Sobo <nathan@zed.dev>"]
 description = "Zed's GPU-accelerated UI framework"
@@ -139,7 +139,6 @@ objc2-core-video = { workspace = true, features = ["CVPixelBuffer"] }
 log.workspace = true
 objc2 = { workspace = true, optional = true }
 objc2-metal = { version = "0.3", optional = true }
-
 mach2.workspace = true
 #TODO: replace with "objc2"
 metal.workspace = true
@@ -152,6 +151,7 @@ wgpu.workspace = true
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "macos"))'.dependencies]
 pathfinder_geometry = "0.5"
+
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))'.dependencies]
 scap = { workspace = true, optional = true }

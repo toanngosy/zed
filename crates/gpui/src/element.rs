@@ -367,7 +367,9 @@ impl<E: Element> Drawable<E> {
                 let inspector_id;
                 #[cfg(any(feature = "inspector", debug_assertions))]
                 {
-                    inspector_id = if window.inspector_enabled() {
+                    // The layout dump reads `id_path`/`source_location` off the
+                    // inspector id, so populate it while a dump is active too.
+                    inspector_id = if window.inspector_enabled() || window.layout_dump.is_some() {
                         self.element
                             .source_location()
                             .map(|source| prepare_inspector_id(source, window))

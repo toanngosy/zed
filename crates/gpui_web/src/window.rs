@@ -6,7 +6,7 @@ use crate::ime_mirror::ImeMirror;
 use crate::platform::WebWindowLifecycle;
 use crate::viewport::WebViewport;
 use std::sync::Arc;
-use std::{cell::Cell, cell::RefCell, rc::Rc};
+use std::{cell::Cell, cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::{
     AnyWindowHandle, Bounds, Capslock, Decorations, DevicePixels, DispatchEventResult,
@@ -63,6 +63,17 @@ pub(crate) struct WebWindowInner {
     pub(crate) callbacks: RefCell<WebWindowCallbacks>,
     pub(crate) click_state: RefCell<ClickState>,
     pub(crate) touch_ids: RefCell<TouchIds>,
+    /// Latest element-local position of every touch pointer that is still
+    /// down, keyed by DOM `pointerId`. Pinch geometry is built from these;
+    /// while two or more are present the touches drive `PlatformInput::Pinch`
+    /// instead of per-finger `PlatformInput::Touch`.
+    pub(crate) active_touches: RefCell<HashMap<i32, Point<Pixels>>>,
+    /// Set once two or more touches are down, cleared when fewer than two
+    /// remain.
+    pub(crate) pinch_active: Cell<bool>,
+    /// Previous finger separation while a pinch is live; `PinchEvent::delta`
+    /// is the relative change since it.
+    pub(crate) pinch_prev_dist: Cell<Option<f32>>,
     pub(crate) pressed_button: Cell<Option<MouseButton>>,
     pub(crate) last_physical_size: Cell<(u32, u32)>,
     pub(crate) notify_scale: Cell<bool>,
@@ -217,6 +228,9 @@ impl WebWindow {
             callbacks: RefCell::new(WebWindowCallbacks::default()),
             click_state: RefCell::new(ClickState::default()),
             touch_ids: RefCell::new(TouchIds::default()),
+            active_touches: RefCell::new(HashMap::new()),
+            pinch_active: Cell::new(false),
+            pinch_prev_dist: Cell::new(None),
             pressed_button: Cell::new(None),
             last_physical_size: Cell::new((0, 0)),
             notify_scale: Cell::new(false),

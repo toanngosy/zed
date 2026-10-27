@@ -4,8 +4,8 @@ use gpui::{
     Capslock, ClipboardEntry, ClipboardItem, ClipboardString, DispatchEventResult, GestureTuning,
     Image, ImageFormat, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent,
     MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
-    Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchEvent, TouchId, TouchPhase,
-    point, px,
+    Pixels, PinchEvent, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchEvent, TouchId,
+    TouchPhase, point, px,
 };
 use wasm_bindgen::prelude::*;
 
@@ -264,6 +264,17 @@ impl WebWindowInner {
                     return;
                 };
                 this.state.borrow_mut().mouse_position = position;
+                this.touch_upsert(event.pointer_id(), position);
+                if this.pinch_active.get() {
+                    // A later finger joins an ongoing pinch: it is tracked for
+                    // pinch geometry and end-of-pinch bookkeeping but emits no
+                    // touch stream of its own.
+                    return;
+                }
+                if this.active_touches.borrow().len() >= 2 {
+                    this.begin_pinch(event.pointer_id());
+                    return;
+                }
                 if this.touch_tap_candidate.get().is_none() {
                     this.touch_tap_candidate
                         .set(Some((event.pointer_id(), position)));
@@ -331,6 +342,13 @@ impl WebWindowInner {
                     return;
                 };
                 this.state.borrow_mut().mouse_position = position;
+                this.touch_remove(event.pointer_id());
+                if this.pinch_active.get() {
+                    // A pinch finger's release is neither a tap nor a touch end:
+                    // the pinch event stream ends it instead.
+                    this.maybe_end_pinch(TouchPhase::Ended);
+                    return;
+                }
                 let completes_tap = match this.touch_tap_candidate.get() {
                     Some((pointer_id, _)) if pointer_id == event.pointer_id() => {
                         this.touch_tap_candidate.set(None);
@@ -448,6 +466,11 @@ impl WebWindowInner {
                 let Some(touch_id) = this.touch_ids.borrow_mut().end(event.pointer_id()) else {
                     return;
                 };
+                this.touch_remove(event.pointer_id());
+                if this.pinch_active.get() {
+                    this.maybe_end_pinch(TouchPhase::Cancelled);
+                    return;
+                }
                 if let Some((pointer_id, _)) = this.touch_tap_candidate.get()
                     && pointer_id == event.pointer_id()
                 {
@@ -556,6 +579,119 @@ impl WebWindowInner {
         self.dispatch_input(PlatformInput::KeyUp(KeyUpEvent { keystroke }));
     }
 
+    /// Insert or update a tracked touch pointer's element-local position.
+    fn touch_upsert(&self, id: i32, pos: Point<Pixels>) {
+        self.active_touches.borrow_mut().insert(id, pos);
+    }
+
+    /// Stop tracking a touch pointer after pointerup/pointercancel.
+    fn touch_remove(&self, id: i32) {
+        self.active_touches.borrow_mut().remove(&id);
+    }
+
+    /// Pinch centroid and finger separation from the first two active touches.
+    ///
+    /// Returns `None` unless at least two touches are down.
+    fn pinch_geometry(&self) -> Option<(Point<Pixels>, f32)> {
+        let touches = self.active_touches.borrow();
+        let mut positions = touches.values();
+        let (a, b) = (*positions.next()?, *positions.next()?);
+        let (ax, ay) = (f32::from(a.x), f32::from(a.y));
+        let (bx, by) = (f32::from(b.x), f32::from(b.y));
+        let center = point(px((ax + bx) / 2.0), px((ay + by) / 2.0));
+        let (dx, dy) = (bx - ax, by - ay);
+        Some((center, (dx * dx + dy * dy).sqrt()))
+    }
+
+    /// Second finger down: unwind each already-dispatched touch (the gesture
+    /// recognizer cancels its pending tap or in-flight pan cleanly) and switch
+    /// the pointer stream over to `PlatformInput::Pinch` until fewer than two
+    /// touches remain.
+    fn begin_pinch(self: &Rc<Self>, newest_pointer_id: i32) {
+        self.pinch_active.set(true);
+        // A pinch is never a tap: drop the candidate so the cancelled first
+        // finger's release cannot summon the keyboard later.
+        self.touch_tap_candidate.set(None);
+        let prior_pointer_ids: Vec<i32> = self
+            .active_touches
+            .borrow()
+            .keys()
+            .copied()
+            .filter(|id| *id != newest_pointer_id)
+            .collect();
+        for pointer_id in prior_pointer_ids {
+            let Some(touch_id) = self.touch_ids.borrow().active(pointer_id) else {
+                continue;
+            };
+            let position = self
+                .active_touches
+                .borrow()
+                .get(&pointer_id)
+                .copied()
+                .unwrap_or_default();
+            self.dispatch_input(PlatformInput::Touch(TouchEvent {
+                id: touch_id,
+                phase: TouchPhase::Cancelled,
+                position,
+                predicted_position: None,
+                force: None,
+            }));
+        }
+        if let Some((center, dist)) = self.pinch_geometry() {
+            self.state.borrow_mut().mouse_position = center;
+            self.pinch_prev_dist.set(Some(dist));
+            self.dispatch_input(PlatformInput::Pinch(PinchEvent {
+                position: center,
+                delta: 0.0,
+                modifiers: Modifiers::default(),
+                phase: TouchPhase::Started,
+            }));
+        }
+    }
+
+    /// Fingers moved while pinching: emit the separation change relative to
+    /// the previous event.
+    fn emit_pinch(self: &Rc<Self>, phase: TouchPhase) {
+        let Some((center, dist)) = self.pinch_geometry() else {
+            return;
+        };
+        self.state.borrow_mut().mouse_position = center;
+        let delta = match self.pinch_prev_dist.replace(Some(dist)) {
+            Some(prev) if prev > f32::EPSILON => dist / prev - 1.0,
+            _ => 0.0,
+        };
+        self.dispatch_input(PlatformInput::Pinch(PinchEvent {
+            position: center,
+            delta,
+            modifiers: Modifiers::default(),
+            phase,
+        }));
+    }
+
+    /// A pinch finger lifted: keep pinching while two or more touches remain,
+    /// otherwise end the pinch. The remaining touches' later events are
+    /// delivered normally; the recognizer ignores them for cancelled ids.
+    fn maybe_end_pinch(self: &Rc<Self>, phase: TouchPhase) {
+        if self.active_touches.borrow().len() >= 2 {
+            return;
+        }
+        self.pinch_active.set(false);
+        self.pinch_prev_dist.set(None);
+        let position = self
+            .active_touches
+            .borrow()
+            .values()
+            .next()
+            .copied()
+            .unwrap_or_else(|| self.state.borrow().mouse_position);
+        self.dispatch_input(PlatformInput::Pinch(PinchEvent {
+            position,
+            delta: 0.0,
+            modifiers: Modifiers::default(),
+            phase,
+        }));
+    }
+
     fn register_pointer_move(self: &Rc<Self>) -> EventListenerHandle {
         let this = Rc::clone(self);
         self.listen("pointermove", move |event: JsValue| {
@@ -568,6 +704,11 @@ impl WebWindowInner {
                 let Some(touch_id) = this.touch_ids.borrow().active(event.pointer_id()) else {
                     return;
                 };
+                this.touch_upsert(event.pointer_id(), position);
+                if this.pinch_active.get() {
+                    this.emit_pinch(TouchPhase::Moved);
+                    return;
+                }
                 this.state.borrow_mut().mouse_position = position;
                 // Mirror the slop rule of gpui's tap recognizer: once the
                 // touch travels beyond it, its release must not affect the

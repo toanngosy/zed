@@ -1,6 +1,6 @@
 use crate::{
     Bounds, Capslock, Context, Empty, IntoElement, Keystroke, LongPressEvent, Modifiers, Pixels,
-    Point, Render, TouchDragEvent, Window, point, seal::Sealed,
+    Point, Render, Size, TouchDragEvent, Window, point, seal::Sealed,
 };
 use smallvec::SmallVec;
 use std::{any::Any, fmt::Debug, ops::Deref, path::PathBuf};
@@ -597,6 +597,25 @@ pub struct PinchEvent {
 
     /// The phase of the pinch gesture.
     pub phase: TouchPhase,
+
+    /// Per-axis finger spread of a two-finger touch pinch.
+    ///
+    /// `None` when the platform reports only a scalar magnification (a
+    /// trackpad magnify gesture).
+    pub spread: Option<PinchSpread>,
+}
+
+/// Horizontal and vertical distance between the two fingers of a touch pinch.
+///
+/// Lets a consumer zoom each axis by its own finger spread: `width` is the
+/// horizontal distance, `height` the vertical one, both non-negative.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PinchSpread {
+    /// The finger spread at this event.
+    pub current: Size<Pixels>,
+    /// The finger spread at the previous event of the same pinch (equal to
+    /// `current` on `TouchPhase::Started`).
+    pub previous: Size<Pixels>,
 }
 
 impl Sealed for PinchEvent {}

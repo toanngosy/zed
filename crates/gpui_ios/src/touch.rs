@@ -44,6 +44,8 @@
 //!   mirroring `gpui_web`'s 2-touch aggregation. The second finger's press is
 //!   suppressed (no `MouseDown`); the consumer cancels the first finger's
 //!   pending press on `Started`. No `ScrollWheel` is emitted while pinching.
+//!   Each pinch carries the per-axis finger spread; a third finger taking over
+//!   the pair restarts the pinch (`Ended` + `Started`) instead of jumping.
 //! - **Momentum** (iOS-only, not on web yet): a fast one-finger lift seeds a
 //!   [`MomentumScroller`]; [`TouchAggregator::pump_momentum`] then continues the
 //!   fling on BOTH channels — decaying synthetic `MouseMove`s (chart pan) and
@@ -52,8 +54,8 @@
 // Rust guideline compliant 2026-02-21
 
 use gpui::{
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels, PlatformInput,
-    Point, ScrollDelta, ScrollWheelEvent, Size, TouchPhase, point, px,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, PinchSpread, Pixels,
+    PlatformInput, Point, ScrollDelta, ScrollWheelEvent, Size, TouchPhase, point, px, size,
 };
 
 use crate::momentum::{MomentumScroller, MomentumStep, VelocityTracker};
@@ -153,8 +155,8 @@ impl AxisLock {
 pub struct TouchAggregator {
     /// Active fingers in arrival order; the first two define pinch geometry.
     active: Vec<(u64, Point<Pixels>)>,
-    /// Finger separation on the previous pinch sample; `None` when not pinching.
-    pinch_prev_dist: Option<f32>,
+    /// Geometry of the previous pinch sample; `None` when not pinching.
+    pinch_prev: Option<PinchSample>,
     /// A pinch happened during the current touch sequence — suppresses a stray
     /// one-finger pan / momentum from the leftover finger until all lift.
     pinch_occurred: bool,
@@ -175,7 +177,7 @@ impl Default for TouchAggregator {
     fn default() -> Self {
         Self {
             active: Vec::new(),
-            pinch_prev_dist: None,
+            pinch_prev: None,
             pinch_occurred: false,
             velocity: VelocityTracker::new(),
             axis_lock: AxisLock::default(),
@@ -258,10 +260,10 @@ impl TouchAggregator {
             // Second finger → pinch. Suppress this finger's press. A pinch
             // invalidates any single-finger axis lock the first finger built up.
             self.axis_lock.reset();
-            if let Some((center, dist)) = self.pinch_geometry() {
-                self.pinch_prev_dist = Some(dist);
+            if let Some(sample) = self.pinch_geometry() {
+                self.pinch_prev = Some(sample);
                 self.pinch_occurred = true;
-                out.push(pinch(center, 0.0, TouchPhase::Started));
+                out.push(sample.event(sample, TouchPhase::Started));
             }
         } else {
             // First finger → a single-finger press; the recognizer classifies it.
@@ -293,13 +295,13 @@ impl TouchAggregator {
 
         if self.active.len() >= 2 {
             // Two fingers → incremental pinch; suppress the pan.
-            if let Some((center, dist)) = self.pinch_geometry() {
-                if let Some(prev) = self.pinch_prev_dist {
-                    if prev > f32::EPSILON {
-                        out.push(pinch(center, dist / prev - 1.0, TouchPhase::Moved));
+            if let Some(sample) = self.pinch_geometry() {
+                if let Some(prev) = self.pinch_prev {
+                    if prev.dist > f32::EPSILON {
+                        out.push(sample.event(prev, TouchPhase::Moved));
                     }
                 }
-                self.pinch_prev_dist = Some(dist);
+                self.pinch_prev = Some(sample);
             }
         } else {
             // Lone finger. Only a genuine drag (not the leftover finger after a
@@ -324,14 +326,28 @@ impl TouchAggregator {
     fn on_ended(&mut self, id: u64, pos: Point<Pixels>, cancelled: bool) -> Vec<PlatformInput> {
         let mut out = Vec::new();
         let was_pinching = self.active.len() >= 2;
+        let pair_finger = self.active.iter().take(2).any(|(tid, _)| *tid == id);
         self.touch_remove(id);
 
         if was_pinching {
             // A finger left a pinch. End it once fewer than two remain; the
             // suppressed finger never became a press, so emit no `MouseUp`.
             if self.active.len() < 2 {
-                self.pinch_prev_dist = None;
-                out.push(pinch(pos, 0.0, TouchPhase::Ended));
+                let last = self.pinch_prev.take();
+                out.push(last.map_or_else(
+                    || pinch(pos, 0.0, None, TouchPhase::Ended),
+                    |last| last.event(last, TouchPhase::Ended),
+                ));
+            } else if pair_finger {
+                // A third finger takes over: restart on the new pair so its
+                // different geometry never reads as finger motion.
+                if let Some(last) = self.pinch_prev.take() {
+                    out.push(last.event(last, TouchPhase::Ended));
+                }
+                if let Some(sample) = self.pinch_geometry() {
+                    self.pinch_prev = Some(sample);
+                    out.push(sample.event(sample, TouchPhase::Started));
+                }
             }
         } else if !cancelled && !self.pinch_occurred {
             // Clean one-finger lift: fling on a fast release, else end the drag.
@@ -383,18 +399,48 @@ impl TouchAggregator {
         self.active.retain(|(tid, _)| *tid != id);
     }
 
-    /// Pinch centroid + finger separation from the first two active touches, or
-    /// `None` with fewer than two.
-    fn pinch_geometry(&self) -> Option<(Point<Pixels>, f32)> {
+    /// Pinch geometry of the first two active touches, or `None` with fewer
+    /// than two.
+    fn pinch_geometry(&self) -> Option<PinchSample> {
         if self.active.len() < 2 {
             return None;
         }
-        let (a, b) = (self.active[0].1, self.active[1].1);
+        Some(PinchSample::of(self.active[0].1, self.active[1].1))
+    }
+}
+
+/// Centroid, separation and per-axis spread of the two pinch fingers.
+#[derive(Debug, Clone, Copy)]
+struct PinchSample {
+    center: Point<Pixels>,
+    dist: f32,
+    spread: Size<Pixels>,
+}
+
+impl PinchSample {
+    fn of(a: Point<Pixels>, b: Point<Pixels>) -> Self {
         let (ax, ay) = (f32::from(a.x), f32::from(a.y));
         let (bx, by) = (f32::from(b.x), f32::from(b.y));
-        let center = point(px((ax + bx) / 2.0), px((ay + by) / 2.0));
         let (dx, dy) = (bx - ax, by - ay);
-        Some((center, (dx * dx + dy * dy).sqrt()))
+        Self {
+            center: point(px((ax + bx) / 2.0), px((ay + by) / 2.0)),
+            dist: (dx * dx + dy * dy).sqrt(),
+            spread: size(px(dx.abs()), px(dy.abs())),
+        }
+    }
+
+    /// The pinch event at this sample, relative to `prev`.
+    fn event(self, prev: Self, phase: TouchPhase) -> PlatformInput {
+        let delta = if prev.dist > f32::EPSILON {
+            self.dist / prev.dist - 1.0
+        } else {
+            0.0
+        };
+        let spread = PinchSpread {
+            current: self.spread,
+            previous: prev.spread,
+        };
+        pinch(self.center, delta, Some(spread), phase)
     }
 }
 
@@ -430,12 +476,18 @@ fn scroll_wheel(position: Point<Pixels>, delta: Point<Pixels>, phase: TouchPhase
     })
 }
 
-fn pinch(position: Point<Pixels>, delta: f32, phase: TouchPhase) -> PlatformInput {
+fn pinch(
+    position: Point<Pixels>,
+    delta: f32,
+    spread: Option<PinchSpread>,
+    phase: TouchPhase,
+) -> PlatformInput {
     PlatformInput::Pinch(PinchEvent {
         position,
         delta,
         modifiers: Default::default(),
         phase,
+        spread,
     })
 }
 
@@ -705,6 +757,59 @@ mod tests {
         let up = agg.on_touch(1, PHASE_ENDED, p(100.0, 100.0));
         assert!(matches!(up.as_slice(), [PlatformInput::MouseUp(_)]));
         assert!(!agg.momentum_open);
+    }
+
+    /// The pinch spread carried by `input`, if it is a pinch.
+    fn spread_of(input: &PlatformInput) -> Option<PinchSpread> {
+        match input {
+            PlatformInput::Pinch(e) => e.spread,
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn pinch_reports_per_axis_spread() {
+        let mut agg = TouchAggregator::new();
+        agg.on_touch(1, PHASE_BEGAN, p(100.0, 100.0));
+        let began = agg.on_touch(2, PHASE_BEGAN, p(200.0, 140.0));
+        let start = spread_of(&began[0]).expect("touch pinch carries a spread");
+        assert_eq!(start.current, size(px(100.0), px(40.0)));
+        assert_eq!(start.previous, start.current, "Started has no motion yet");
+
+        // A purely horizontal spread grows only the width.
+        let moved = agg.on_touch(2, PHASE_MOVED, p(260.0, 140.0));
+        let step = spread_of(&moved[0]).expect("moved pinch carries a spread");
+        assert_eq!(step.previous, size(px(100.0), px(40.0)));
+        assert_eq!(step.current, size(px(160.0), px(40.0)));
+
+        // Crossing fingers keeps the spread non-negative.
+        let crossed = agg.on_touch(2, PHASE_MOVED, p(40.0, 60.0));
+        let step = spread_of(&crossed[0]).expect("moved pinch carries a spread");
+        assert_eq!(step.current, size(px(60.0), px(40.0)));
+    }
+
+    #[test]
+    fn lifting_a_pair_finger_with_two_left_restarts_the_pinch() {
+        let mut agg = TouchAggregator::new();
+        agg.on_touch(1, PHASE_BEGAN, p(100.0, 100.0));
+        agg.on_touch(2, PHASE_BEGAN, p(200.0, 100.0));
+        agg.on_touch(3, PHASE_BEGAN, p(400.0, 300.0));
+
+        // Finger 1 lifts: the pair becomes (2, 3), whose geometry differs.
+        let out = agg.on_touch(1, PHASE_ENDED, p(100.0, 100.0));
+        assert_eq!(out.len(), 2);
+        assert!(is_pinch(&out[0], TouchPhase::Ended));
+        assert!(is_pinch(&out[1], TouchPhase::Started));
+        let restart = spread_of(&out[1]).expect("restart carries a spread");
+        assert_eq!(restart.current, size(px(200.0), px(200.0)));
+        assert_eq!(restart.previous, restart.current);
+
+        // The next move is measured against the new pair, not the old one.
+        let moved = agg.on_touch(3, PHASE_MOVED, p(400.0, 300.0));
+        let PlatformInput::Pinch(e) = &moved[0] else {
+            panic!("expected pinch move");
+        };
+        assert_eq!(e.delta, 0.0);
     }
 
     #[test]

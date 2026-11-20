@@ -2768,6 +2768,7 @@ impl Dispatch<zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1, ()>
                     delta: 0.0,
                     modifiers: state.modifiers,
                     phase: TouchPhase::Started,
+                    spread: None,
                 });
                 drop(state);
                 window.handle_input(input);
@@ -2783,6 +2784,7 @@ impl Dispatch<zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1, ()>
                     delta: zoom_delta,
                     modifiers: state.modifiers,
                     phase: TouchPhase::Moved,
+                    spread: None,
                 });
                 drop(state);
                 window.handle_input(input);
@@ -2798,6 +2800,7 @@ impl Dispatch<zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1, ()>
                     delta: 0.0,
                     modifiers: state.modifiers,
                     phase: TouchPhase::Ended,
+                    spread: None,
                 });
                 drop(state);
                 window.handle_input(input);

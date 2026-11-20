@@ -4,7 +4,7 @@ use gpui::{
     Capslock, ClipboardEntry, ClipboardItem, ClipboardString, DispatchEventResult, GestureTuning,
     Image, ImageFormat, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent,
     MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, NavigationDirection,
-    Pixels, PinchEvent, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchEvent, TouchId,
+    PinchEvent, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchEvent, TouchId,
     TouchPhase, point, px,
 };
 use wasm_bindgen::prelude::*;
@@ -342,11 +342,11 @@ impl WebWindowInner {
                     return;
                 };
                 this.state.borrow_mut().mouse_position = position;
-                this.touch_remove(event.pointer_id());
+                let pair_finger = this.touch_remove(event.pointer_id());
                 if this.pinch_active.get() {
                     // A pinch finger's release is neither a tap nor a touch end:
                     // the pinch event stream ends it instead.
-                    this.maybe_end_pinch(TouchPhase::Ended);
+                    this.maybe_end_pinch(TouchPhase::Ended, pair_finger);
                     return;
                 }
                 let completes_tap = match this.touch_tap_candidate.get() {
@@ -466,9 +466,9 @@ impl WebWindowInner {
                 let Some(touch_id) = this.touch_ids.borrow_mut().end(event.pointer_id()) else {
                     return;
                 };
-                this.touch_remove(event.pointer_id());
+                let pair_finger = this.touch_remove(event.pointer_id());
                 if this.pinch_active.get() {
-                    this.maybe_end_pinch(TouchPhase::Cancelled);
+                    this.maybe_end_pinch(TouchPhase::Cancelled, pair_finger);
                     return;
                 }
                 if let Some((pointer_id, _)) = this.touch_tap_candidate.get()
@@ -581,26 +581,13 @@ impl WebWindowInner {
 
     /// Insert or update a tracked touch pointer's element-local position.
     fn touch_upsert(&self, id: i32, pos: Point<Pixels>) {
-        self.active_touches.borrow_mut().insert(id, pos);
+        self.active_touches.borrow_mut().upsert(id, pos);
     }
 
-    /// Stop tracking a touch pointer after pointerup/pointercancel.
-    fn touch_remove(&self, id: i32) {
-        self.active_touches.borrow_mut().remove(&id);
-    }
-
-    /// Pinch centroid and finger separation from the first two active touches.
-    ///
-    /// Returns `None` unless at least two touches are down.
-    fn pinch_geometry(&self) -> Option<(Point<Pixels>, f32)> {
-        let touches = self.active_touches.borrow();
-        let mut positions = touches.values();
-        let (a, b) = (*positions.next()?, *positions.next()?);
-        let (ax, ay) = (f32::from(a.x), f32::from(a.y));
-        let (bx, by) = (f32::from(b.x), f32::from(b.y));
-        let center = point(px((ax + bx) / 2.0), px((ay + by) / 2.0));
-        let (dx, dy) = (bx - ax, by - ay);
-        Some((center, (dx * dx + dy * dy).sqrt()))
+    /// Stop tracking a touch pointer after pointerup/pointercancel; `true`
+    /// when it was one of the pinch pair.
+    fn touch_remove(&self, id: i32) -> bool {
+        self.active_touches.borrow_mut().remove(id)
     }
 
     /// Second finger down: unwind each already-dispatched touch (the gesture
@@ -615,8 +602,7 @@ impl WebWindowInner {
         let prior_pointer_ids: Vec<i32> = self
             .active_touches
             .borrow()
-            .keys()
-            .copied()
+            .ids()
             .filter(|id| *id != newest_pointer_id)
             .collect();
         for pointer_id in prior_pointer_ids {
@@ -626,8 +612,7 @@ impl WebWindowInner {
             let position = self
                 .active_touches
                 .borrow()
-                .get(&pointer_id)
-                .copied()
+                .get(pointer_id)
                 .unwrap_or_default();
             self.dispatch_input(PlatformInput::Touch(TouchEvent {
                 id: touch_id,
@@ -637,59 +622,60 @@ impl WebWindowInner {
                 force: None,
             }));
         }
-        if let Some((center, dist)) = self.pinch_geometry() {
-            self.state.borrow_mut().mouse_position = center;
-            self.pinch_prev_dist.set(Some(dist));
-            self.dispatch_input(PlatformInput::Pinch(PinchEvent {
-                position: center,
-                delta: 0.0,
-                modifiers: Modifiers::default(),
-                phase: TouchPhase::Started,
-            }));
+        self.start_pinch_sample();
+    }
+
+    /// Emit `Started` for the current pinch pair and measure from it.
+    fn start_pinch_sample(self: &Rc<Self>) {
+        let sample = self.active_touches.borrow().pinch_sample();
+        if let Some(sample) = sample {
+            self.state.borrow_mut().mouse_position = sample.center;
+            self.pinch_prev.set(Some(sample));
+            self.dispatch_input(PlatformInput::Pinch(
+                sample.event(sample, TouchPhase::Started),
+            ));
         }
     }
 
-    /// Fingers moved while pinching: emit the separation change relative to
-    /// the previous event.
+    /// Fingers moved while pinching: emit the change relative to the previous
+    /// event.
     fn emit_pinch(self: &Rc<Self>, phase: TouchPhase) {
-        let Some((center, dist)) = self.pinch_geometry() else {
+        let sample = self.active_touches.borrow().pinch_sample();
+        let Some(sample) = sample else {
             return;
         };
-        self.state.borrow_mut().mouse_position = center;
-        let delta = match self.pinch_prev_dist.replace(Some(dist)) {
-            Some(prev) if prev > f32::EPSILON => dist / prev - 1.0,
-            _ => 0.0,
-        };
-        self.dispatch_input(PlatformInput::Pinch(PinchEvent {
-            position: center,
-            delta,
-            modifiers: Modifiers::default(),
-            phase,
-        }));
+        self.state.borrow_mut().mouse_position = sample.center;
+        let prev = self.pinch_prev.replace(Some(sample)).unwrap_or(sample);
+        self.dispatch_input(PlatformInput::Pinch(sample.event(prev, phase)));
     }
 
     /// A pinch finger lifted: keep pinching while two or more touches remain,
-    /// otherwise end the pinch. The remaining touches' later events are
-    /// delivered normally; the recognizer ignores them for cancelled ids.
-    fn maybe_end_pinch(self: &Rc<Self>, phase: TouchPhase) {
-        if self.active_touches.borrow().len() >= 2 {
+    /// otherwise end the pinch. When a pair finger lifts and a third finger
+    /// takes over, the pinch restarts so the new pair never reads as motion.
+    /// The remaining touches' later events are delivered normally; the
+    /// recognizer ignores them for cancelled ids.
+    fn maybe_end_pinch(self: &Rc<Self>, phase: TouchPhase, pair_finger: bool) {
+        let remaining = self.active_touches.borrow().len();
+        if remaining >= 2 && !pair_finger {
             return;
         }
-        self.pinch_active.set(false);
-        self.pinch_prev_dist.set(None);
-        let position = self
-            .active_touches
-            .borrow()
-            .values()
-            .next()
-            .copied()
-            .unwrap_or_else(|| self.state.borrow().mouse_position);
-        self.dispatch_input(PlatformInput::Pinch(PinchEvent {
-            position,
-            delta: 0.0,
-            modifiers: Modifiers::default(),
-            phase,
-        }));
+        let last = self.pinch_prev.take();
+        let ended = match last {
+            Some(last) => last.event(last, phase),
+            None => PinchEvent {
+                position: self.state.borrow().mouse_position,
+                delta: 0.0,
+                modifiers: Modifiers::default(),
+                phase,
+                spread: None,
+            },
+        };
+        self.dispatch_input(PlatformInput::Pinch(ended));
+        if remaining >= 2 {
+            self.start_pinch_sample();
+        } else {
+            self.pinch_active.set(false);
+        }
     }
 
     fn register_pointer_move(self: &Rc<Self>) -> EventListenerHandle {

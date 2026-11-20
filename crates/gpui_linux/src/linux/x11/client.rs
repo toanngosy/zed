@@ -1460,6 +1460,7 @@ impl X11Client {
                     delta: 0.0,
                     modifiers,
                     phase: gpui::TouchPhase::Started,
+                    spread: None,
                 }));
             }
             Event::XinputGesturePinchUpdate(event) => {
@@ -1482,6 +1483,7 @@ impl X11Client {
                     delta: zoom_delta,
                     modifiers,
                     phase: gpui::TouchPhase::Moved,
+                    spread: None,
                 }));
             }
             Event::XinputGesturePinchEnd(event) => {
@@ -1500,6 +1502,7 @@ impl X11Client {
                     delta: 0.0,
                     modifiers,
                     phase: gpui::TouchPhase::Ended,
+                    spread: None,
                 }));
             }
             _ => {}

@@ -253,6 +253,7 @@ pub(crate) unsafe fn platform_input_from_native(
                     delta: magnification,
                     modifiers: read_modifiers(native_event),
                     phase,
+                    spread: None,
                 })
             }),
             NSEventType::NSScrollWheel => window_height.map(|window_height| {

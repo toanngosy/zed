@@ -186,6 +186,7 @@ impl DirectManipulationEventHandler {
                         delta: 0.0,
                         modifiers,
                         phase: TouchPhase::Ended,
+                        spread: None,
                     }));
             }
             GestureKind::None => {}
@@ -310,6 +311,7 @@ impl IDirectManipulationViewportEventHandler_Impl for DirectManipulationEventHan
                         delta: 0.0,
                         modifiers,
                         phase: TouchPhase::Started,
+                        spread: None,
                     }));
             }
         } else if self.gesture_kind.get() == GestureKind::None {
@@ -342,6 +344,7 @@ impl IDirectManipulationViewportEventHandler_Impl for DirectManipulationEventHan
                         delta: scale_delta - 1.0,
                         modifiers,
                         phase: TouchPhase::Moved,
+                        spread: None,
                     }));
             }
             GestureKind::None => {}
